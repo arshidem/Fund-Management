@@ -9,6 +9,9 @@ app.use(express.json());
 app.use(cors(
     allowedOrigins=['http://localhost:5173']
 ));
+app.get("/", (req, res) => {
+  res.send("✅ Server is running successfully!");
+});
 // Routes
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/admin", require("./routes/adminRoutes"));
