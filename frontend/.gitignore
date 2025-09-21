@@ -7,8 +7,7 @@ frontend/.pnp
 frontend/.pnp.js
 
 # production build
-frontend/build/
-frontend/dist/
+
 
 # misc
 frontend/.DS_Store
