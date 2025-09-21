@@ -1,53 +1,39 @@
-# ----------------
-# Frontend (React, Vue, Angular)
-# ----------------
-# dependencies
+# === Backend (Root) ===
+node_modules/
+.env
+.env.*
+dist/
+build/
+package-lock.json
+*.log
+pids
+*.pid
+
+# === Frontend (React + Vite in frontend/) ===
 frontend/node_modules/
-frontend/.pnp
-frontend/.pnp.js
+frontend/dist/
+frontend/.env
+frontend/.env.*
+frontend/package-lock.json
 
-# production build
-
-
-# misc
-frontend/.DS_Store
-frontend/Thumbs.db
-
-# testing
-frontend/coverage/
-frontend/.nyc_output/
-
-# debug
-frontend/npm-debug.log*
-frontend/yarn-debug.log*
-frontend/yarn-error.log*
-
-# local env
-frontend/.env.local
-frontend/.env.development.local
-frontend/.env.test.local
-frontend/.env.production.local
-
-# ----------------
-# IDE / System Files
-# ----------------
-.vscode/
-.idea/
+# === OS / Editor files ===
 .DS_Store
 Thumbs.db
-.env
 
-# ----------------
-# Cache
-# ----------------
-.cache/
-.next/
-out/
+# === Logs ===
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# ----------------
-# Coverage reports
-# ----------------
-coverage/
+# === IDEs / Editors ===
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
 
-# Misc swap/temp files
-*.swp
+# === Misc ===
+*.local
+*.cache
+
+.vercel
