@@ -1,48 +1,29 @@
-self.addEventListener('install', (event) => {
-  console.log('[Service Worker] Installed');
-  self.skipWaiting();
-});
-
-self.addEventListener('activate', (event) => {
-  console.log('[Service Worker] Activated');
-  return self.clients.claim();
-});
-
-// Listen for push events
-self.addEventListener('push', (event) => {
-  console.log('[Service Worker] Push received:', event);
-
-  let data = { title: 'New Notification', body: 'You have a new notification', url: '/' };
-  
+self.addEventListener('push', event => {
+  let data = {};
   if (event.data) {
-    data = event.data.json();
+    try { data = event.data.json(); } catch (err) { console.error(err); }
   }
 
+  const title = data.title || 'New Notification';
   const options = {
-    body: data.body,
-    icon: '/icon.png',
-    badge: '/icon.png',
-    data: { url: data.url },
-    tag: 'notification-' + Date.now(),
-    renotify: true
+    body: data.message || '',
+    icon: data.icon || '/icon.png',
+    badge: data.badge || '/icon.png',
+    data: { url: data.data?.clickAction || '/' },
   };
 
-  event.waitUntil(
-    self.registration.showNotification(data.title, options)
-  );
+  event.waitUntil(self.registration.showNotification(title, options));
 });
 
-// Handle notification click
-self.addEventListener('notificationclick', (event) => {
+self.addEventListener('notificationclick', event => {
   event.notification.close();
-  const url = event.notification.data?.url || '/';
-  
+  const clickAction = event.notification.data.url || '/';
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      for (let client of clientList) {
-        if (client.url === url && 'focus' in client) return client.focus();
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
+      for (const client of clientList) {
+        if (client.url === clickAction && 'focus' in client) return client.focus();
       }
-      if (clients.openWindow) return clients.openWindow(url);
+      if (clients.openWindow) return clients.openWindow(clickAction);
     })
   );
 });

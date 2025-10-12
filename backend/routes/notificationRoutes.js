@@ -1,22 +1,40 @@
-const express = require("express");
+const express = require('express');
 const router = express.Router();
+const { protect, adminOnly } = require('../middleware/authMiddleware');
 const {
   createNotification,
-  createBroadcastNotification,
-  getNotifications,
+  getMyNotifications,
+  getUnreadCount,
   markAsRead,
-} = require("../controllers/notificationController");
+  markAllAsRead,
+  deleteNotification
+} = require('../controllers/notificationController');
 
-// Create notification for a single user
-router.post("/", createNotification);
+// All routes are protected
+router.use(protect);
 
-// Create broadcast notification for all users
-router.post("/broadcast", createBroadcastNotification);
+// @route   GET /api/notifications
+// @desc    Get current user's notifications
+router.get('/', getMyNotifications);
 
-// Get all notifications for a user
-router.get("/:userId", getNotifications);
+// @route   GET /api/notifications/unread-count
+// @desc    Get unread notifications count
+router.get('/unread-count', getUnreadCount);
 
-// Mark notification as read
-router.patch("/read/:notificationId", markAsRead);
+// @route   POST /api/notifications
+// @desc    Create a new notification (admin only for broadcasting)
+router.post('/', createNotification); // Add adminOnly middleware if needed
+
+// @route   PUT /api/notifications/:id/read
+// @desc    Mark a notification as read
+router.put('/:id/read', markAsRead);
+
+// @route   PUT /api/notifications/mark-all-read
+// @desc    Mark all notifications as read for current user
+router.put('/mark-all-read', markAllAsRead);
+
+// @route   DELETE /api/notifications/:id
+// @desc    Delete a notification
+router.delete('/:id', deleteNotification);
 
 module.exports = router;

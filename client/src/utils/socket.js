@@ -1,111 +1,79 @@
-import { io } from 'socket.io-client';
+// src/utils/socket.js
+import { io } from "socket.io-client";
+
+let socket = null;
 
 class SocketService {
-  constructor() {
-    this.socket = null;
-    this.isConnecting = false;
-    this.connectionPromise = null;
-    this.connectionTimeout = null;
-  }
+  connect(backendUrl, token) {
+    return new Promise((resolve, reject) => {
+      if (!backendUrl) {
+        return reject(new Error("backendUrl is required to connect SocketService"));
+      }
 
-  async connect(token) {
-    if (this.socket?.connected) return this.socket;
-    if (this.isConnecting) return this.connectionPromise;
+      // reuse existing socket if connected
+      if (socket && socket.connected) return resolve(socket);
 
-    this.isConnecting = true;
+      // create socket instance
+      socket = io(backendUrl, {
+        auth: token ? { token } : undefined,
+        transports: ["websocket"],
+        autoConnect: true,
+      });
 
-    this.connectionPromise = new Promise((resolve, reject) => {
-      try {
-        console.log('🔄 Connecting to socket...');
-
-        this.socket = io(import.meta.env.VITE_API_URL || 'http://localhost:5000', {
-          auth: { token },
-          transports: ['websocket', 'polling'],
-          reconnection: true,
-          reconnectionAttempts: 5,
-          reconnectionDelay: 1000,
-        });
-
-        const clearTimeoutFunc = () => {
-          if (this.connectionTimeout) {
-            clearTimeout(this.connectionTimeout);
-            this.connectionTimeout = null;
-          }
-        };
-
-        this.socket.on('connect', () => {
-          console.log('✅ Socket connected:', this.socket.id);
-          this.isConnecting = false;
-          clearTimeoutFunc();
-          resolve(this.socket);
-        });
-
-        this.socket.on('disconnect', (reason) => {
-          console.log('❌ Socket disconnected:', reason);
-          this.isConnecting = false;
-        });
-
-        this.socket.on('connect_error', (error) => {
-          console.error('🔌 Connection error:', error.message);
-          this.isConnecting = false;
-          clearTimeoutFunc();
-          reject(error);
-        });
-
-        this.connectionTimeout = setTimeout(() => {
-          if (this.isConnecting) {
-            this.isConnecting = false;
-            reject(new Error('Socket connection timeout'));
-          }
-        }, 10000);
-
-      } catch (err) {
-        this.isConnecting = false;
+      const onConnect = () => {
+        cleanup();
+        resolve(socket);
+      };
+      const onError = (err) => {
+        cleanup();
         reject(err);
+      };
+
+      function cleanup() {
+        socket.off("connect", onConnect);
+        socket.off("connect_error", onError);
       }
+
+      socket.on("connect", onConnect);
+      socket.on("connect_error", onError);
+
+      // optional timeout fallback
+      setTimeout(() => {
+        if (!socket.connected) {
+          cleanup();
+          reject(new Error("Socket connection timeout"));
+        }
+      }, 5000);
     });
-
-    return this.connectionPromise;
-  }
-
-  disconnect() {
-    if (this.socket) {
-      console.log('🔌 Disconnecting socket...');
-      this.socket.removeAllListeners();
-      this.socket.disconnect();
-      this.socket = null;
-      this.isConnecting = false;
-      this.connectionPromise = null;
-      if (this.connectionTimeout) {
-        clearTimeout(this.connectionTimeout);
-        this.connectionTimeout = null;
-      }
-    }
   }
 
   joinUserRoom(userId) {
-    if (this.socket?.connected) {
-      console.log('👤 Joining user room:', userId);
-      this.socket.emit('join', userId); // matches your backend "join" listener
-    } else {
-      console.warn('⚠️ Cannot join user room: Socket not connected');
-    }
+    if (!socket) return;
+    // emit both in case server is listening to one of them
+    socket.emit("join", userId);
+    socket.emit("joinUser", userId);
   }
 
   joinAdminRoom(adminId) {
-    if (this.socket?.connected) {
-      console.log('👑 Joining admin room:', adminId);
-      this.socket.emit('join', adminId); // backend treats all rooms as "join"
-    } else {
-      console.warn('⚠️ Cannot join admin room: Socket not connected');
-    }
+    if (!socket) return;
+    // emit both common admin join names
+    socket.emit("joinAdmin", adminId);
+    socket.emit("join", adminId);
   }
 
-  isConnected() {
-    return this.socket?.connected || false;
+  disconnect() {
+    if (!socket) return;
+    try {
+      socket.disconnect();
+    } catch (e) {
+      // ignore
+    }
+    socket = null;
+  }
+
+  getSocket() {
+    return socket;
   }
 }
 
-// Single instance
-const socketService = new SocketService();
-export default socketService;
+export default new SocketService();

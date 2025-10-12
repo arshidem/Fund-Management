@@ -1,209 +1,417 @@
-// src/context/NotificationContext.jsx
-import React, { createContext, useState, useContext, useEffect, useRef } from 'react';
-import SocketService from '../utils/socket';
-import { useAppContext } from './AppContext';
+import React, {
+  createContext,
+  useContext,
+  useReducer,
+  useEffect,
+  useRef,
+} from "react";
+import { toast } from "react-hot-toast";
+import { io } from "socket.io-client";
+import { notificationAPI } from "../services/notificationService";
+import { useAppContext } from "./AppContext";
 
 const NotificationContext = createContext();
 
+// Notification reducer
+const notificationReducer = (state, action) => {
+  switch (action.type) {
+    case "SET_NOTIFICATIONS":
+      return {
+        ...state,
+        notifications: action.payload.notifications,
+        pagination: action.payload.pagination,
+        unreadCount: action.payload.unreadCount,
+        lastFetched: Date.now(),
+      };
+
+    case "ADD_NOTIFICATION":
+      const isDuplicate = state.notifications.some(
+        (notif) => notif._id === action.payload._id
+      );
+
+      if (isDuplicate) return state;
+
+      // Limit notifications to prevent memory issues
+      const newNotifications = [action.payload, ...state.notifications].slice(
+        0,
+        100
+      );
+
+      return {
+        ...state,
+        notifications: newNotifications,
+        unreadCount: state.unreadCount + 1,
+      };
+
+    case "MARK_AS_READ":
+      return {
+        ...state,
+        notifications: state.notifications.map((notif) =>
+          notif._id === action.payload ? { ...notif, isRead: true } : notif
+        ),
+        unreadCount: Math.max(0, state.unreadCount - 1),
+      };
+
+    case "MARK_ALL_AS_READ":
+      return {
+        ...state,
+        notifications: state.notifications.map((notif) => ({
+          ...notif,
+          isRead: true,
+        })),
+        unreadCount: 0,
+      };
+
+    case "DELETE_NOTIFICATION":
+      const notificationToDelete = state.notifications.find(
+        (notif) => notif._id === action.payload
+      );
+
+      return {
+        ...state,
+        notifications: state.notifications.filter(
+          (notif) => notif._id !== action.payload
+        ),
+        unreadCount: notificationToDelete?.isRead
+          ? state.unreadCount
+          : Math.max(0, state.unreadCount - 1),
+      };
+
+    case "SET_LOADING":
+      return {
+        ...state,
+        loading: action.payload,
+      };
+
+    case "SET_UNREAD_COUNT":
+      return {
+        ...state,
+        unreadCount: action.payload,
+      };
+
+    case "SET_SOCKET_CONNECTED":
+      return {
+        ...state,
+        socketConnected: action.payload,
+      };
+
+    case "CLEAR_NOTIFICATIONS":
+      return {
+        ...state,
+        notifications: [],
+        unreadCount: 0,
+        pagination: { current: 1, total: 1 },
+      };
+
+    default:
+      return state;
+  }
+};
+
+const initialState = {
+  notifications: [],
+  unreadCount: 0,
+  loading: false,
+  socketConnected: false,
+  pagination: {
+    current: 1,
+    total: 1,
+  },
+  lastFetched: null,
+};
+
 export const NotificationProvider = ({ children }) => {
-  const { user, token, isAuthenticated, backendUrl } = useAppContext();
+  const [state, dispatch] = useReducer(notificationReducer, initialState);
+  const { token, user } = useAppContext();
+  const socketRef = useRef(null);
+  const fetchTimeoutRef = useRef(null);
 
-  const [notifications, setNotifications] = useState([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [isConnected, setIsConnected] = useState(false);
-  const [connectionError, setConnectionError] = useState(null);
-
-  const mounted = useRef(true);
-  const setupComplete = useRef(false);
-
-  // =============================
-  // SOCKET.IO SETUP
-  // =============================
+  // Initialize Socket.io with better connection handling
   useEffect(() => {
-    mounted.current = true;
-    if (!mounted.current || setupComplete.current || !isAuthenticated || !user || !token) return;
+    if (!token) {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+      dispatch({ type: "CLEAR_NOTIFICATIONS" });
+      dispatch({ type: "SET_SOCKET_CONNECTED", payload: false });
+      return;
+    }
 
-    const setup = async () => {
-      try {
-        const socket = await SocketService.connect(token);
-        if (!mounted.current) return SocketService.disconnect();
+    const backendUrl =
+      import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 
-        setIsConnected(true);
-        setupComplete.current = true;
+    console.log("🔌 Connecting to notification server...");
 
-        // Join user room (user notifications)
-        SocketService.joinUserRoom(user._id);
+    socketRef.current = io(backendUrl, {
+      auth: {
+        token: token,
+      },
+      transports: ["websocket", "polling"],
+      timeout: 10000,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+    });
 
-        // Admin users join "admins" room
-        if (user.role === 'admin') SocketService.joinAdminRoom(user._id);
+    socketRef.current.on("connect", () => {
+      console.log("✅ Connected to notification server");
+      dispatch({ type: "SET_SOCKET_CONNECTED", payload: true });
+    });
 
-        // Listen for incoming notifications
-        setupSocketListeners(socket);
+    socketRef.current.on("disconnect", (reason) => {
+      console.log("❌ Disconnected from notification server:", reason);
+      dispatch({ type: "SET_SOCKET_CONNECTED", payload: false });
+    });
 
-        // Load existing notifications from backend
-        await fetchNotifications();
-      } catch (error) {
-        console.error('Socket setup error:', error);
-        if (mounted.current) {
-          setConnectionError(error.message);
-          setIsConnected(false);
-          setupComplete.current = false;
-        }
+    socketRef.current.on("connect_error", (error) => {
+      console.error("🔌 Connection error:", error.message);
+      dispatch({ type: "SET_SOCKET_CONNECTED", payload: false });
+    });
+
+    socketRef.current.on("newNotification", (notification) => {
+      console.log("📨 New notification received");
+      dispatch({ type: "ADD_NOTIFICATION", payload: notification });
+      showNotificationToast(notification);
+    });
+
+    socketRef.current.on("notificationRead", (data) => {
+      dispatch({ type: "SET_UNREAD_COUNT", payload: data.unreadCount });
+    });
+
+    socketRef.current.on("allNotificationsRead", (data) => {
+      dispatch({ type: "SET_UNREAD_COUNT", payload: data.unreadCount });
+    });
+
+    socketRef.current.on("notificationDeleted", (data) => {
+      dispatch({ type: "SET_UNREAD_COUNT", payload: data.unreadCount });
+    });
+
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
       }
     };
+  }, [token]);
 
-    setup();
-    return () => cleanupSocket();
-  }, [isAuthenticated, user, token]);
-
-  // =============================
-  // SOCKET LISTENERS
-  // =============================
-  const setupSocketListeners = (socket) => {
-    socket.off('newNotification'); // ensure no duplicates
-    socket.on('newNotification', (notification) => {
-      if (!mounted.current) return;
-
-      // Update state
-      setNotifications(prev => [notification, ...prev]);
-      setUnreadCount(prev => prev + 1);
-
-      // Browser notification
-      if ('Notification' in window && Notification.permission === 'granted') {
-        const browserNotification = new Notification(notification.title || 'New Notification', {
-          body: notification.message,
-          icon: '/icon.png',
-          badge: '/icon.png'
-        });
-        browserNotification.onclick = () => {
-          window.focus();
-          browserNotification.close();
-          if (notification.pageToNavigate) window.location.href = notification.pageToNavigate;
-        };
-        setTimeout(() => browserNotification.close(), 5000);
+  // Debounced fetch notifications
+  useEffect(() => {
+    if (token) {
+      // Clear any pending fetch
+      if (fetchTimeoutRef.current) {
+        clearTimeout(fetchTimeoutRef.current);
       }
-    });
 
-    socket.on('disconnect', () => {
-      setIsConnected(false);
-      setupComplete.current = false;
-    });
+      // Debounce fetch to prevent rapid consecutive calls
+      fetchTimeoutRef.current = setTimeout(() => {
+        fetchNotifications();
+        fetchUnreadCount();
+      }, 500);
+    } else {
+      dispatch({ type: "CLEAR_NOTIFICATIONS" });
+    }
+
+    return () => {
+      if (fetchTimeoutRef.current) {
+        clearTimeout(fetchTimeoutRef.current);
+      }
+    };
+  }, [token]);
+
+  // Show notification toast
+  const showNotificationToast = (notification) => {
+    toast.custom(
+      (t) => (
+        <div
+          className={`${
+            t.visible ? "animate-enter" : "animate-leave"
+          } max-w-md w-full bg-white shadow-lg rounded-lg pointer-events-auto flex ring-1 ring-black ring-opacity-5 border-l-4 ${
+            notification.priority === "high"
+              ? "border-red-500"
+              : notification.priority === "medium"
+              ? "border-yellow-500"
+              : "border-blue-500"
+          }`}
+        >
+          <div className="flex-1 w-0 p-4">
+            <div className="flex items-start">
+              <div className="ml-3 flex-1">
+                <p className="text-sm font-medium text-gray-900">
+                  {notification.title}
+                </p>
+                <p className="mt-1 text-sm text-gray-500 line-clamp-2">
+                  {notification.message}
+                </p>
+                <p className="mt-1 text-xs text-gray-400">
+                  {new Date(notification.createdAt).toLocaleTimeString()}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="flex border-l border-gray-200">
+            <button
+              onClick={() => {
+                toast.dismiss(t.id);
+                if (notification.actionUrl) {
+                  window.location.href = notification.actionUrl;
+                }
+              }}
+              className="w-full border border-transparent rounded-none rounded-r-lg p-4 flex items-center justify-center text-sm font-medium text-indigo-600 hover:text-indigo-500"
+            >
+              View
+            </button>
+          </div>
+        </div>
+      ),
+      {
+        duration: 6000,
+        position: "top-right",
+      }
+    );
   };
 
-  // =============================
-  // FETCH NOTIFICATIONS
-  // =============================
-  const fetchNotifications = async () => {
-    if (!token || !backendUrl || !user?._id) return;
+  // Actions with better error handling
+  const fetchNotifications = async (page = 1, limit = 20, filters = {}) => {
+    // Prevent too frequent fetches (min 2 seconds between fetches)
+    if (state.lastFetched && Date.now() - state.lastFetched < 2000) {
+      console.log("⏳ Skipping fetch - too frequent");
+      return;
+    }
 
     try {
-      const res = await fetch(`${backendUrl}/api/notifications/${user._id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      const data = await res.json();
+      dispatch({ type: "SET_LOADING", payload: true });
+      const response = await notificationAPI.getNotifications(
+        page,
+        limit,
+        filters
+      );
 
-      const notifs = data.notifications || data || [];
-      setNotifications(notifs);
-
-      const unread = notifs.filter(n => !n.read).length;
-      setUnreadCount(unread);
-    } catch (err) {
-      console.error('Error fetching notifications:', err.message);
+      if (response.success) {
+        dispatch({
+          type: "SET_NOTIFICATIONS",
+          payload: {
+            notifications: response.data,
+            pagination: response.pagination,
+            unreadCount: response.unreadCount,
+          },
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching notifications:", error);
+      if (error.message !== "Too many concurrent requests") {
+        toast.error("Failed to load notifications");
+      }
+    } finally {
+      dispatch({ type: "SET_LOADING", payload: false });
     }
   };
 
-  // =============================
-  // ACTIONS
-  // =============================
-  const markAsRead = async (notificationId) => {
-    if (!token || !backendUrl) return;
+  const fetchUnreadCount = async () => {
     try {
-      const res = await fetch(`${backendUrl}/api/notifications/${notificationId}/read`, {
-        method: 'PATCH',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        setNotifications(prev =>
-          prev.map(n => (n._id === notificationId ? { ...n, read: true } : n))
-        );
-        setUnreadCount(prev => Math.max(0, prev - 1));
+      const response = await notificationAPI.getUnreadCount();
+      if (response.success) {
+        dispatch({
+          type: "SET_UNREAD_COUNT",
+          payload: response.data.unreadCount,
+        });
       }
-    } catch (err) {
-      console.error('Mark as read failed:', err);
+    } catch (error) {
+      console.error("Error fetching unread count:", error);
+      // Silent fail for unread count
+    }
+  };
+
+  const markAsRead = async (notificationId) => {
+    try {
+      const response = await notificationAPI.markAsRead(notificationId);
+      if (response.success) {
+        dispatch({ type: "MARK_AS_READ", payload: notificationId });
+      }
+    } catch (error) {
+      console.error("Error marking notification as read:", error);
+      toast.error("Failed to mark notification as read");
     }
   };
 
   const markAllAsRead = async () => {
-    if (!token || !backendUrl) return;
     try {
-      const res = await fetch(`${backendUrl}/api/notifications/read-all`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-        setUnreadCount(0);
+      const response = await notificationAPI.markAllAsRead();
+      if (response.success) {
+        dispatch({ type: "MARK_ALL_AS_READ" });
+        toast.success("All notifications marked as read");
       }
-    } catch (err) {
-      console.error('Mark all read failed:', err);
+    } catch (error) {
+      console.error("Error marking all notifications as read:", error);
+      toast.error("Failed to mark all notifications as read");
     }
   };
 
   const deleteNotification = async (notificationId) => {
-    if (!token || !backendUrl) return;
     try {
-      const res = await fetch(`${backendUrl}/api/notifications/${notificationId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) setNotifications(prev => prev.filter(n => n._id !== notificationId));
-    } catch (err) {
-      console.error('Delete notification failed:', err);
+      const response = await notificationAPI.deleteNotification(notificationId);
+      if (response.success) {
+        dispatch({ type: "DELETE_NOTIFICATION", payload: notificationId });
+        toast.success("Notification deleted");
+      }
+    } catch (error) {
+      console.error("Error deleting notification:", error);
+      toast.error("Failed to delete notification");
     }
   };
-
-  // =============================
-  // CLEANUP
-  // =============================
-  const cleanupSocket = () => {
-    SocketService.disconnect();
-    setIsConnected(false);
-    setConnectionError(null);
-    setupComplete.current = false;
-    setNotifications([]);
-    setUnreadCount(0);
-  };
-
-  // =============================
-  // BROWSER PERMISSION
-  // =============================
-  useEffect(() => {
-    if ('Notification' in window && Notification.permission !== 'granted') {
-      Notification.requestPermission();
+  // Add this function to your NotificationContext
+  const markAllAsReadOnVisit = async () => {
+    try {
+      const response = await notificationAPI.markAllAsRead();
+      if (response.success) {
+        dispatch({ type: "MARK_ALL_AS_READ" });
+        console.log("✅ All notifications marked as read automatically");
+      }
+    } catch (error) {
+      console.error("Error marking all as read:", error);
     }
-  }, []);
+  };
+const updateEntryStatus = async (notificationId, status) => {
+  const res = await fetch(`${backendUrl}/api/notifications/${notificationId}/entry-status`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ status }),
+  });
+  const data = await res.json();
+  if (data.success) {
+    setNotifications(prev =>
+      prev.map(n =>
+        n._id === notificationId
+          ? { ...n, metadata: { ...n.metadata, status } }
+          : n
+      )
+    );
+  }
+};
+
+  const value = {
+    ...state,
+    fetchNotifications,
+    fetchUnreadCount,
+    markAsRead,
+    markAllAsRead,
+    deleteNotification,
+    markAllAsReadOnVisit, // Add this
+    updateEntryStatus,
+  };
 
   return (
-    <NotificationContext.Provider
-      value={{
-        notifications,
-        unreadCount,
-        isConnected,
-        connectionError,
-        markAsRead,
-        markAllAsRead,
-        deleteNotification,
-        fetchNotifications,
-      }}
-    >
+    <NotificationContext.Provider value={value}>
       {children}
     </NotificationContext.Provider>
   );
 };
 
-export const useNotifications = () => {
+export const useNotification = () => {
   const context = useContext(NotificationContext);
-  if (!context) throw new Error('useNotifications must be used within NotificationProvider');
+  if (!context) {
+    throw new Error(
+      "useNotification must be used within a NotificationProvider"
+    );
+  }
   return context;
 };
