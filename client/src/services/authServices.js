@@ -51,3 +51,14 @@ export const authMe = async (backendUrl, token) => {
     throw err.response?.data || { message: "Error fetching user" };
   }
 };
+// Update user profile
+export const updateProfile = async (backendUrl, token, updateData) => {
+  try {
+    const res = await axios.put(`${backendUrl}/api/auth/update`, updateData, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return res.data; // { message, user }
+  } catch (err) {
+    throw err.response?.data || { message: "Error updating profile" };
+  }
+};

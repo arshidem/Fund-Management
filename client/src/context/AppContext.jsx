@@ -13,6 +13,8 @@ export const AppProvider = ({ children }) => {
   const [token, setToken] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(false);
+    const [theme, setTheme] = useState(localStorage.getItem("theme") || "light");
+
   const navigate = useNavigate();
 
   // 'loading' | 'approved' | 'pending' | 'blocked'
@@ -21,6 +23,21 @@ export const AppProvider = ({ children }) => {
   // Derived state
   const isAuthenticated = !!user;
   const canAccess = status === "approved";
+
+    const toggleTheme = () => {
+    const newTheme = theme === "light" ? "dark" : "light";
+    setTheme(newTheme);
+    localStorage.setItem("theme", newTheme);
+  };
+
+  // 🌓 Apply theme to <html> for Tailwind dark mode
+useEffect(() => {
+  if (theme === "dark") {
+    document.documentElement.classList.add("dark");
+  } else {
+    document.documentElement.classList.remove("dark");
+  }
+}, [theme]);
 
   // Function to check user auth status
   const checkUserAuth = async (authToken = token) => {
@@ -46,6 +63,7 @@ export const AppProvider = ({ children }) => {
 
       if (data?.user) {
         setUser(data.user);
+console.log(data.user);
 
         if (data.user.isBlocked) {
           setStatus("blocked");
@@ -164,6 +182,8 @@ export const AppProvider = ({ children }) => {
         login,
         logout,
         refreshAuth, // Export for manual refreshing
+        theme,
+        toggleTheme,
       }}
     >
       {authReady ? (

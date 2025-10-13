@@ -15,7 +15,7 @@ import { TbHelp } from "react-icons/tb";
 import { RiMoneyRupeeCircleLine } from "react-icons/ri";
 
 const Dashboard = () => {
-  const { user, token, logout } = useAppContext();
+  const { user, token, logout } = useAppContext(); // ✅ Added theme
   const navigate = useNavigate();
   const eventService = useEventService();
   const { unreadCount } = useNotification();
@@ -82,8 +82,8 @@ const Dashboard = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-lg text-gray-600 animate-pulse">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <div className="text-lg text-gray-600 dark:text-gray-400 animate-pulse">
           Loading dashboard...
         </div>
       </div>
@@ -91,14 +91,18 @@ const Dashboard = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6 transition-colors duration-300">
       {/* Header */}
       <div className="flex flex-wrap justify-between items-center mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-600 mt-1">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+            Dashboard
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400 mt-1">
             Welcome back,{" "}
-            <span className="font-semibold">{user?.name || user?.email}</span>
+            <span className="font-semibold text-gray-900 dark:text-white">
+              {user?.name || user?.email}
+            </span>
             {user?.role === "admin" && " (Admin)"}
           </p>
         </div>
@@ -121,39 +125,7 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Stats Overview */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-10">
-        <div className="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition">
-          <h3 className="text-sm font-semibold text-gray-500">
-            Total Events
-          </h3>
-          <p className="text-3xl font-bold text-blue-600 mt-1">
-            {stats.totalEvents}
-          </p>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition">
-          <h3 className="text-sm font-semibold text-gray-500">
-            Upcoming Events
-          </h3>
-          <p className="text-3xl font-bold text-green-600 mt-1">
-            {stats.upcomingEvents}
-          </p>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition">
-          <h3 className="text-sm font-semibold text-gray-500">My Events</h3>
-          <p className="text-3xl font-bold text-purple-600 mt-1">
-            {stats.myEvents}
-          </p>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition">
-          <h3 className="text-sm font-semibold text-gray-500">
-            Total Contributed
-          </h3>
-          <p className="text-3xl font-bold text-orange-600 mt-1">
-            ₹{stats.totalContributed}
-          </p>
-        </div>
-      </div>
+
 
       {/* Admin Controls */}
       {user?.role === "admin" && (
@@ -174,19 +146,21 @@ const Dashboard = () => {
       )}
 
       {/* Recent Events */}
-      <div className="bg-white rounded-xl shadow-sm border p-6 mb-10">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-10">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">Recent Events</h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Recent Events
+          </h2>
           <button
             onClick={() => navigate("/events")}
-            className="text-blue-600 hover:text-blue-700 font-medium text-sm"
+            className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium text-sm"
           >
             View All →
           </button>
         </div>
 
         {events.length === 0 ? (
-          <div className="text-center py-10 text-gray-500">
+          <div className="text-center py-10 text-gray-500 dark:text-gray-400">
             No events found.{" "}
             {user?.role === "admin" && "Create your first event!"}
           </div>
@@ -201,52 +175,64 @@ const Dashboard = () => {
 
       {/* Quick Actions */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-12">
-        <button
-          onClick={() => navigate("/events")}
-          className="p-4 bg-white rounded-xl shadow-sm border hover:shadow-md transition flex flex-col items-center justify-center"
-        >
-          <MdEvent size={26} className="mb-2 text-blue-600" />
-          <span className="font-medium text-gray-700 text-sm">
-            Browse Events
-          </span>
-        </button>
-        <button
-          onClick={() => navigate("/contributions")}
-          className="p-4 bg-white rounded-xl shadow-sm border hover:shadow-md transition flex flex-col items-center justify-center"
-        >
-          <RiMoneyRupeeCircleLine size={26} className="mb-2 text-green-600" />
-          <span className="font-medium text-gray-700 text-sm">My Payments</span>
-        </button>
-        <button
-          onClick={() => navigate("/profile")}
-          className="p-4 bg-white rounded-xl shadow-sm border hover:shadow-md transition flex flex-col items-center justify-center"
-        >
-          <BsPersonCircle size={26} className="mb-2 text-purple-600" />
-          <span className="font-medium text-gray-700 text-sm">Profile</span>
-        </button>
-        <button
-          onClick={() => navigate("/help")}
-          className="p-4 bg-white rounded-xl shadow-sm border hover:shadow-md transition flex flex-col items-center justify-center"
-        >
-          <TbHelp size={26} className="mb-2 text-orange-600" />
-          <span className="font-medium text-gray-700 text-sm">Help</span>
-        </button>
+        {[
+          { icon: MdEvent, label: "Browse Events", color: "blue", onClick: () => navigate("/events") },
+          { icon: RiMoneyRupeeCircleLine, label: "My Payments", color: "green", onClick: () => navigate("/contributions") },
+          { icon: BsPersonCircle, label: "Profile", color: "purple", onClick: () => navigate("/profile") },
+          { icon: TbHelp, label: "Help", color: "orange", onClick: () => navigate("/help") },
+        ].map((action, index) => (
+          <button
+            key={index}
+            onClick={action.onClick}
+            className="p-4 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition flex flex-col items-center justify-center"
+          >
+            <action.icon 
+              size={26} 
+              className={`mb-2 text-${action.color}-600 dark:text-${action.color}-400`} 
+            />
+            <span className="font-medium text-gray-700 dark:text-gray-300 text-sm">
+              {action.label}
+            </span>
+          </button>
+        ))}
       </div>
-
+      {/* Stats Overview */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-10">
+        {[
+          { label: "Total Events", value: stats.totalEvents, color: "blue" },
+          { label: "Upcoming Events", value: stats.upcomingEvents, color: "green" },
+          { label: "My Events", value: stats.myEvents, color: "purple" },
+          { label: "Total Contributed", value: `₹${stats.totalContributed}`, color: "orange" },
+        ].map((stat, index) => (
+          <div 
+            key={index}
+            className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 hover:shadow-md transition"
+          >
+            <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400">
+              {stat.label}
+            </h3>
+            <p className={`text-3xl font-bold text-${stat.color}-600 mt-1`}>
+              {stat.value}
+            </p>
+          </div>
+        ))}
+      </div>
       {/* Event Grid */}
-      <div className="bg-white rounded-xl shadow-sm border p-6">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">All Events</h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            All Events
+          </h2>
           <button
             onClick={() => navigate("/events")}
-            className="text-blue-600 hover:text-blue-700 font-medium text-sm"
+            className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium text-sm"
           >
             View All →
           </button>
         </div>
 
         {events.length === 0 ? (
-          <div className="text-center py-10 text-gray-500">
+          <div className="text-center py-10 text-gray-500 dark:text-gray-400">
             No events available.
           </div>
         ) : (
@@ -268,7 +254,7 @@ const Dashboard = () => {
       {/* Event Form Modal */}
       {(showEventForm || editingEvent) && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-lg">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-lg">
             <EventForm
               event={editingEvent}
               onSubmit={

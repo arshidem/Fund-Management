@@ -565,35 +565,49 @@ const getContributionStatistics = async (req, res) => {
 };
 
 // ==================== HELPER FUNCTION ====================
+// ==================== HELPER FUNCTION ====================
 const updateParticipantContribution = async (participantId) => {
   try {
-    const participant = await Participant.findById(participantId);
-    const totalContributions = await Contribution.aggregate([
-      {
-        $match: {
-          participant: participant._id,
-          status: 'completed'
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          totalAmount: { $sum: '$amount' },
-          totalRefunds: { $sum: '$refundAmount' }
-        }
-      }
-    ]);
-
-    if (totalContributions.length > 0) {
-      participant.totalContributed = totalContributions[0].totalAmount - totalContributions[0].totalRefunds;
-      participant.lastPaymentDate = new Date();
-      await participant.updatePaymentStatus();
-      await participant.save();
+    const participant = await Participant.findById(participantId).populate('event');
+    
+    if (!participant) {
+      console.error('Participant not found:', participantId);
+      return;
     }
 
+    // Calculate total contributions using Mongoose (simpler approach)
+    const contributions = await Contribution.find({
+      participant: participantId,
+      status: 'completed'
+    });
+
+    const totalAmount = contributions.reduce((sum, contrib) => sum + contrib.amount, 0);
+    const totalRefunds = contributions.reduce((sum, contrib) => sum + (contrib.refundAmount || 0), 0);
+    const netAmount = totalAmount - totalRefunds;
+
+    // Update participant
+    participant.totalContributed = netAmount;
+    participant.lastPaymentDate = new Date();
+    
+    // Update payment status (with proper error handling)
+    try {
+      await participant.updatePaymentStatus();
+    } catch (error) {
+      console.error('Error updating payment status:', error);
+      // Continue without throwing to prevent breaking the flow
+    }
+    
+    await participant.save();
+
     // Update event total collected
-    const event = await Event.findById(participant.event);
-    await event.updateFinancials();
+    try {
+      const event = await Event.findById(participant.event);
+      if (event) {
+        await event.updateFinancials();
+      }
+    } catch (error) {
+      console.error('Error updating event financials:', error);
+    }
 
   } catch (error) {
     console.error('Update participant contribution error:', error);

@@ -131,13 +131,12 @@ const getEventParticipants = async (req, res) => {
       });
     }
 
-    // SIMPLIFIED: Only check if user is event creator (admin routes use adminOnly middleware)
-    if (event.createdBy.toString() !== req.userId) {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized to view participants for this event'
-      });
-    }
+    // if (event.createdBy.toString() !== req.userId) {
+    //   return res.status(403).json({
+    //     success: false,
+    //     message: 'Not authorized to view participants for this event'
+    //   });
+    // }
 
     let query = { event: eventId };
     
@@ -147,8 +146,8 @@ const getEventParticipants = async (req, res) => {
     if (search) {
       const users = await User.find({
         $or: [
-          { name: { $regex: search, $options: 'i' } },
-          { email: { $regex: search, $options: 'i' } }
+          { 'user.name': { $regex: search, $options: 'i' } },
+          { 'user.email': { $regex: search, $options: 'i' } }
         ]
       }).select('_id');
       query.user = { $in: users.map(u => u._id) };

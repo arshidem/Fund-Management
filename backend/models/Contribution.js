@@ -261,13 +261,15 @@ contributionSchema.pre('save', function(next) {
   
   next();
 });
-
 contributionSchema.post('save', async function(doc) {
   // Update participant's total contribution when payment is completed
   if (doc.status === 'completed' || doc.status === 'refunded') {
     try {
       const Participant = mongoose.model('Participant');
-      const totalContributions = await this.constructor.getUserTotalContributions(doc.user, doc.event);
+      const Contribution = mongoose.model('Contribution');
+      
+      // Use the model directly instead of this.constructor
+      const totalContributions = await Contribution.getUserTotalContributions(doc.user, doc.event);
       
       if (totalContributions.length > 0) {
         await Participant.findOneAndUpdate(
@@ -277,9 +279,19 @@ contributionSchema.post('save', async function(doc) {
             lastPaymentDate: doc.paymentDate
           }
         );
+      } else {
+        // If no contributions found, set to 0
+        await Participant.findOneAndUpdate(
+          { event: doc.event, user: doc.user },
+          { 
+            totalContributed: 0,
+            lastPaymentDate: doc.paymentDate
+          }
+        );
       }
     } catch (error) {
       console.error('Error updating participant contribution:', error);
+      // Don't throw error in post middleware as it can't be caught
     }
   }
 });

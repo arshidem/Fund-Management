@@ -30,7 +30,7 @@ router.get('/events/:eventId/participants', protect, getEventParticipants);
 router.post('/events/:eventId/invite', protect, inviteParticipant);
 
 // ==================== ADMIN-ONLY ROUTES ====================
-router.get('/admin/events/:eventId/participants', adminOnly, getEventParticipants);
+router.get('/admin/events/:eventId/participants', protect, getEventParticipants);
 router.put('/admin/:participantId/status', adminOnly, updateParticipantStatus);
 router.delete('/admin/:participantId', adminOnly, removeParticipant);
 

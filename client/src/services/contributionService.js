@@ -1,6 +1,6 @@
 // services/useContributionService.js
 import axios from "axios";
-import { useAppContext } from "../../../context/AppContext";
+import { useAppContext } from "../context/AppContext";
 
 export const useContributionService = () => {
   const { backendUrl, token } = useAppContext();

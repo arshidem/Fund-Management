@@ -10,6 +10,7 @@ router.post("/register-details", authController.registerDetails);
 
 // Protected routes
 router.get("/me", protect, authController.authMe);
+router.put("/update", protect, authController.updateProfile);
 
 // Admin routes
 router.get("/user/:id", protect, adminOnly, authController.getUser);

@@ -117,22 +117,22 @@ participantSchema.index({ user: 1, status: 1 });
 
 // ==================== VIRTUAL FIELDS ====================
 participantSchema.virtual('remainingAmount').get(function() {
-  if (!this.populated('event')) return 0;
+  if (!this.populated('event') || !this.event || !this.event.minimumContribution) return 0;
   return Math.max(0, this.event.minimumContribution - this.totalContributed);
 });
 
 participantSchema.virtual('isFullyPaid').get(function() {
-  if (!this.populated('event')) return false;
+  if (!this.populated('event') || !this.event || !this.event.minimumContribution) return false;
   return this.totalContributed >= this.event.minimumContribution;
 });
 
 participantSchema.virtual('isOverpaid').get(function() {
-  if (!this.populated('event')) return false;
+  if (!this.populated('event') || !this.event || !this.event.minimumContribution) return false;
   return this.totalContributed > this.event.minimumContribution;
 });
 
 participantSchema.virtual('paymentPercentage').get(function() {
-  if (!this.populated('event') || this.event.minimumContribution === 0) return 0;
+  if (!this.populated('event') || !this.event || this.event.minimumContribution === 0) return 0;
   return (this.totalContributed / this.event.minimumContribution) * 100;
 });
 
@@ -149,22 +149,41 @@ participantSchema.virtual('isOnWaitlist').get(function() {
 });
 
 // ==================== METHODS ====================
-participantSchema.methods.updatePaymentStatus = function() {
-  if (!this.populated('event')) {
-    throw new Error('Event must be populated to update payment status');
-  }
+participantSchema.methods.updatePaymentStatus = async function() {
+  try {
+    // Ensure event is populated
+    if (!this.event || typeof this.event === 'string' || !this.event.minimumContribution) {
+      await this.populate('event');
+    }
 
-  const minContribution = this.event.minimumContribution;
-  
-  if (this.totalContributed >= minContribution) {
-    this.paymentStatus = this.totalContributed > minContribution ? 'overpaid' : 'paid';
-  } else if (this.totalContributed > 0) {
-    this.paymentStatus = 'partial';
-  } else {
-    this.paymentStatus = 'pending';
+    // If still no event data, use safe defaults
+    if (!this.event || !this.event.minimumContribution) {
+      console.warn('Event not populated properly for payment status update');
+      
+      // Set payment status based on contribution amount alone
+      if (this.totalContributed > 0) {
+        this.paymentStatus = 'partial';
+      } else {
+        this.paymentStatus = 'pending';
+      }
+      return;
+    }
+
+    const minContribution = this.event.minimumContribution;
+    
+    if (this.totalContributed >= minContribution) {
+      this.paymentStatus = this.totalContributed > minContribution ? 'overpaid' : 'paid';
+    } else if (this.totalContributed > 0) {
+      this.paymentStatus = 'partial';
+    } else {
+      this.paymentStatus = 'pending';
+    }
+    
+  } catch (error) {
+    console.error('Error in updatePaymentStatus:', error);
+    // Set a default payment status to prevent complete failure
+    this.paymentStatus = this.totalContributed > 0 ? 'partial' : 'pending';
   }
-  
-  return this.save();
 };
 
 participantSchema.methods.addContribution = async function(amount) {

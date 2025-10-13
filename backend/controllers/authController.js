@@ -373,3 +373,41 @@ exports.getUser = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+// ✅ Update User Profile Controller
+exports.updateProfile = async (req, res) => {
+  try {
+    const userId = req.userId; // from auth middleware
+    const { name, email, phone, gender } = req.body;
+
+    // Basic validation
+    if (!name || !email || !phone) {
+      return res
+        .status(400)
+        .json({ message: "Name, email, and phone are required." });
+    }
+
+    // Update user profile
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { name, email, phone, gender },
+      { new: true, runValidators: true }
+    ).select("-otp -otpExpires"); // exclude sensitive fields
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json({
+      success: true,
+      message: "Profile updated successfully",
+      user: updatedUser,
+    });
+  } catch (error) {
+    console.error("Error updating profile:", error);
+    res
+      .status(500)
+      .json({ message: "Server error", error: error.message });
+  }
+};
+
