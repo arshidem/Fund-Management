@@ -16,7 +16,7 @@ import Profile from "./user/pages/Profile";
 import PrivacySecurity from "./user/pages/PrivacySecurity";
 import UserMessage from "./user/pages/UserMessage";
 import ProtectedLayout from "./user/components/ProtectedLayout";
-
+import EventForm from "./user/pages/EventDetails/components/EventForm";
 import { Toaster } from "react-hot-toast";
 import "./index.css";
 
@@ -68,6 +68,7 @@ function AppContent() {
           <Route path="/privacy&security" element={<PrivacySecurity />} />
           <Route path="/messages" element={<UserMessage />} />
           <Route path="/events" element={<Event />} />
+          <Route path="/admin/events/edit/:id" element={<EventForm />} />
           <Route path="/messages/user/:userId" element={<UserMessage />} />
         </Route>
 
@@ -82,7 +83,7 @@ function App() {
     <AppProvider>
       <NotificationProvider>
         <Toaster
-          position="top-right"
+          position="bottom-center"
           toastOptions={{
             duration: 4000,
             style: { background: "#363636", color: "#fff" },

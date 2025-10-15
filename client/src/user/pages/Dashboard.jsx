@@ -3,7 +3,6 @@ import React, { useState, useEffect } from "react";
 import { useAppContext } from "../../context/AppContext";
 import { useNavigate } from "react-router-dom";
 import { useEventService } from "../../services/eventService";
-import EventForm from "../components/EventForm";
 import EventCard from "../components/EventCard";
 import EventCarousel from "../components/EventCarousel";
 import NotificationBell from "../components/NotificationBell";
@@ -13,7 +12,6 @@ import { MdEvent } from "react-icons/md";
 import { BsPersonCircle } from "react-icons/bs";
 import { TbHelp } from "react-icons/tb";
 import { RiMoneyRupeeCircleLine } from "react-icons/ri";
-
 const Dashboard = () => {
   const { user, token, logout } = useAppContext(); // ✅ Added theme
   const navigate = useNavigate();

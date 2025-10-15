@@ -16,9 +16,10 @@ const joinEvent = async (req, res) => {
       return res.status(404).json({ success: false, message: "Event not found" });
     }
 
-    if (!event.isActive || event.status !== "published") {
-      return res.status(400).json({ success: false, message: "Event is not available for joining" });
-    }
+ const allowedStatuses = ["published", "ongoing"];
+if (!event.isActive || !allowedStatuses.includes(event.status)) {
+  return res.status(400).json({ success: false, message: "Event is not available for joining" });
+}
 
     // check if participant exists for this user + event
     let participant = await Participant.findOne({
@@ -131,56 +132,72 @@ const getEventParticipants = async (req, res) => {
       });
     }
 
-    // if (event.createdBy.toString() !== req.userId) {
-    //   return res.status(403).json({
-    //     success: false,
-    //     message: 'Not authorized to view participants for this event'
-    //   });
-    // }
-
     let query = { event: eventId };
     
-    if (status) query.status = status;
-    if (paymentStatus) query.paymentStatus = paymentStatus;
+    if (status && status !== 'all') query.status = status;
+    if (paymentStatus && paymentStatus !== 'all') query.paymentStatus = paymentStatus;
 
+    // Fixed search query
     if (search) {
       const users = await User.find({
         $or: [
-          { 'user.name': { $regex: search, $options: 'i' } },
-          { 'user.email': { $regex: search, $options: 'i' } }
+          { name: { $regex: search, $options: 'i' } },
+          { email: { $regex: search, $options: 'i' } }
         ]
       }).select('_id');
-      query.user = { $in: users.map(u => u._id) };
+      
+      if (users.length > 0) {
+        query.user = { $in: users.map(u => u._id) };
+      } else {
+        query.user = { $in: [] };
+      }
     }
 
     const participants = await Participant.find(query)
       .populate('user', 'name email phone avatar')
+      .populate('event')
       .sort({ joinedAt: 1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
 
     const total = await Participant.countDocuments(query);
 
-    const paymentSummary = await Participant.aggregate([
-      { $match: { event: event._id, status: 'active' } },
-      { $group: { _id: '$paymentStatus', count: { $sum: 1 }, totalAmount: { $sum: '$totalContributed' } } }
-    ]);
-
-    const participantsWithDetails = participants.map(participant => 
-      participant.toParticipantJSON()
+    // Process participants with virtual fields
+    const participantsWithDetails = await Promise.all(
+      participants.map(async (participant) => {
+        try {
+          return await participant.toParticipantJSON();
+        } catch (error) {
+          console.error('Error processing participant:', error);
+          return participant.toObject();
+        }
+      })
     );
+
+    // Simple payment summary from participant data
+    const paymentSummary = {};
+    participantsWithDetails.forEach(participant => {
+      const status = participant.paymentStatus;
+      if (!paymentSummary[status]) {
+        paymentSummary[status] = { count: 0, totalAmount: 0 };
+      }
+      paymentSummary[status].count++;
+      paymentSummary[status].totalAmount += participant.totalContributed || 0;
+    });
 
     res.json({
       success: true,
       participants: participantsWithDetails,
       summary: {
         totalParticipants: total,
-        paymentSummary: paymentSummary.reduce((acc, stat) => {
-          acc[stat._id] = { count: stat.count, totalAmount: stat.totalAmount };
-          return acc;
-        }, {})
+        paymentSummary
       },
-      pagination: { current: parseInt(page), total: Math.ceil(total / limit) }
+      pagination: { 
+        current: parseInt(page), 
+        total: Math.ceil(total / limit),
+        hasNext: (page * limit) < total,
+        hasPrev: page > 1
+      }
     });
 
   } catch (error) {
@@ -261,9 +278,9 @@ const updateParticipantStatus = async (req, res) => {
     }
 
     // SIMPLIFIED: Only check if user is event creator (admin routes use adminOnly middleware)
-    if (participant.event.createdBy.toString() !== req.userId) {
-      return res.status(403).json({ message: 'Not authorized to update participant status' });
-    }
+    // if (participant.event.createdBy.toString() !== req.userId) {
+    //   return res.status(403).json({ message: 'Not authorized to update participant status' });
+    // }
 
     if (status) participant.status = status;
     if (notes !== undefined) participant.notes = notes;

@@ -16,7 +16,7 @@ const { protect, adminOnly } = require('../middleware/authMiddleware');
 // ==================== PAYMENT ROUTES ====================
 router.post('/events/:eventId/contributions/razorpay/order', protect, createRazorpayOrder);
 router.post('/contributions/:contributionId/verify-razorpay', protect, verifyRazorpayPayment);
-router.post('/events/:eventId/contributions/offline', protect, createOfflineContribution);
+router.post('/:eventId/offline', protect, createOfflineContribution);
 
 // ==================== USER ROUTES ====================
 router.get('/user/:userId/contributions', protect, getUserContributions);

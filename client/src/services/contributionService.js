@@ -43,19 +43,26 @@ export const useContributionService = () => {
   };
 
   // ✅ Create offline contribution (requires { amount, paymentMethod, transactionId?, notes? })
-  const createOfflineContribution = async (eventId, { amount, paymentMethod, transactionId, notes }) => {
-    try {
-      const response = await axios.post(
-        `${backendUrl}/api/contributions/events/${eventId}/contributions/offline`,
-        { amount, paymentMethod, transactionId, notes },
-        { headers }
-      );
-      return response.data;
-    } catch (error) {
-      console.error("Error creating offline contribution:", error);
-      throw new Error(error.response?.data?.message || "Failed to create offline contribution");
-    }
-  };
+// In contributionService.js - FIXED SIGNATURE
+const createOfflineContribution = async (eventId, contributionData) => {
+  try {
+    console.log('📤 Service received:', { eventId, contributionData });
+    
+    // Send ALL the data received
+    const response = await axios.post(
+      `${backendUrl}/api/contributions/${eventId}/offline`,
+      contributionData, // Send the entire object
+      { headers }
+    );
+    
+    console.log('✅ Success response:', response.data);
+    return response.data;
+    
+  } catch (error) {
+    console.error("❌ Error creating offline contribution:", error);
+    throw new Error(error.response?.data?.message || "Failed to create offline contribution");
+  }
+};
 
   // ==================== USER ROUTES ====================
 

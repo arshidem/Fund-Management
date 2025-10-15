@@ -179,72 +179,171 @@ const verifyRazorpayPayment = async (req, res) => {
 
 // ==================== CREATE OFFLINE CONTRIBUTION ====================
 const createOfflineContribution = async (req, res) => {
+  console.log('🎯 OFFLINE CONTRIBUTION ENDPOINT HIT!');
+  console.log('📝 Method:', req.method);
+  console.log('📝 URL:', req.originalUrl);
+  console.log('📝 Event ID:', req.params.eventId);
+  console.log('📝 Full Request Body:', JSON.stringify(req.body, null, 2));
+  console.log('📝 Authenticated User ID:', req.userId);
+
   try {
     const { eventId } = req.params;
     const {
       amount,
       paymentMethod,
       transactionId,
-      notes
+      notes,
+      userId,
+      participantId,
+      createdBy
     } = req.body;
+
+    console.log('🔍 PARSED DATA:');
+    console.log('  - eventId:', eventId);
+    console.log('  - userId:', userId);
+    console.log('  - participantId:', participantId);
+    console.log('  - amount:', amount);
+    console.log('  - paymentMethod:', paymentMethod);
 
     // Validate required fields
     if (!amount || !paymentMethod) {
+      console.log('❌ Missing amount or paymentMethod');
       return res.status(400).json({
         success: false,
         message: 'Amount and payment method are required'
       });
     }
 
-    // Validate payment method
-    const validOfflineMethods = ['cash', 'bank_transfer', 'upi'];
-    if (!validOfflineMethods.includes(paymentMethod)) {
+    if (!userId && !participantId) {
+      console.log('❌ Missing both userId and participantId');
       return res.status(400).json({
         success: false,
-        message: 'Invalid payment method for offline contribution'
+        message: 'User ID or Participant ID is required'
       });
     }
 
-    // Find event and participant
-    const [event, participant] = await Promise.all([
-      Event.findById(eventId),
-      Participant.findOne({ event: eventId, user: req.userId })
-    ]);
-
+    // Find event
+    console.log('🔍 Looking for event:', eventId);
+    const event = await Event.findById(eventId);
     if (!event) {
+      console.log('❌ Event not found');
       return res.status(404).json({ message: 'Event not found' });
     }
+    console.log('✅ Event found:', event.title);
 
-    if (!participant) {
-      return res.status(404).json({ message: 'You are not participating in this event' });
+    // Find participant with detailed debugging
+    console.log('🔍 STARTING PARTICIPANT SEARCH...');
+    let participant = null;
+
+    // Method 1: Find by participantId
+    if (participantId) {
+      console.log('🔍 METHOD 1: Searching by participantId:', participantId);
+      participant = await Participant.findById(participantId);
+      if (participant) {
+        console.log('✅ FOUND by participantId:', {
+          participantId: participant._id,
+          participantUserId: participant.user,
+          eventId: participant.event
+        });
+      } else {
+        console.log('❌ NOT FOUND by participantId');
+      }
     }
 
+    // Method 2: Find by userId and eventId
+    if (!participant && userId) {
+      console.log('🔍 METHOD 2: Searching by userId:', userId, 'and eventId:', eventId);
+      participant = await Participant.findOne({ 
+        event: eventId, 
+        user: userId 
+      });
+      if (participant) {
+        console.log('✅ FOUND by userId:', {
+          participantId: participant._id,
+          participantUserId: participant.user,
+          eventId: participant.event
+        });
+      } else {
+        console.log('❌ NOT FOUND by userId');
+      }
+    }
+
+    // Debug: Check all participants for this event
+    if (!participant) {
+      console.log('🔍 DEBUG: Checking ALL participants for event', eventId);
+      const allParticipants = await Participant.find({ event: eventId });
+      console.log('📊 ALL PARTICIPANTS FOR EVENT:', allParticipants.length);
+      
+      allParticipants.forEach((p, index) => {
+        console.log(`  Participant ${index + 1}:`, {
+          _id: p._id,
+          user: p.user,
+          userString: p.user?.toString(),
+          event: p.event,
+          status: p.status
+        });
+      });
+
+      // Check if participant exists but with different user ID format
+      const participantById = await Participant.findById(participantId);
+      console.log('🔍 Direct find by participantId result:', participantById);
+
+      return res.status(404).json({ 
+        success: false,
+        message: 'Participant not found for this event',
+        debug: {
+          received: {
+            userId,
+            participantId,
+            eventId
+          },
+          availableParticipants: allParticipants.length,
+          participantIds: allParticipants.map(p => p._id.toString()),
+          userIds: allParticipants.map(p => p.user?.toString())
+        }
+      });
+    }
+
+    console.log('✅ PARTICIPANT FOUND SUCCESSFULLY:', {
+      participantId: participant._id.toString(),
+      userId: participant.user?.toString(),
+      eventId: participant.event?.toString()
+    });
+
+    // Verify admin permissions
+    console.log('🔍 Checking admin permissions...');
+
+
     // Create contribution
+    console.log('🔍 Creating contribution...');
     const contribution = new Contribution({
       event: eventId,
       participant: participant._id,
-      user: req.userId,
+      user: userId,
       amount: parseFloat(amount),
       paymentMethod,
-      transactionId,
+      transactionId: transactionId || `OFFLINE_${Date.now()}_${userId}`,
       notes,
-      status: 'pending', // Admin needs to verify offline payments
-      createdBy: req.userId
+      status: 'completed',
+      createdBy: req.userId,
+      verifiedBy: req.userId,
+      verifiedAt: new Date()
     });
 
     await contribution.save();
-
     await contribution.populate('user', 'name email');
     await contribution.populate('participant');
 
+    console.log('✅ CONTRIBUTION CREATED SUCCESSFULLY:', contribution._id);
+
     res.status(201).json({
       success: true,
-      message: 'Offline contribution recorded successfully. Waiting for admin verification.',
+      message: 'Offline contribution added successfully',
       contribution: contribution.toPaymentJSON()
     });
 
   } catch (error) {
-    console.error('Create offline contribution error:', error);
+    console.error('❌ Create offline contribution error:', error);
     res.status(500).json({
       success: false,
       message: 'Error creating offline contribution',
@@ -252,7 +351,6 @@ const createOfflineContribution = async (req, res) => {
     });
   }
 };
-
 // ==================== GET EVENT CONTRIBUTIONS ====================
 const getEventContributions = async (req, res) => {
   try {

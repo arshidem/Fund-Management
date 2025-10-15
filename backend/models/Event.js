@@ -52,11 +52,7 @@ const eventSchema = new mongoose.Schema({
       message: 'Maximum contribution must be greater than or equal to minimum contribution'
     }
   },
-  totalCollected: { 
-    type: Number, 
-    default: 0,
-    min: 0
-  },
+
   totalExpenses: { 
     type: Number, 
     default: 0,
@@ -223,6 +219,37 @@ const eventSchema = new mongoose.Schema({
 });
 
 // ==================== VIRTUAL FIELDS ====================
+
+eventSchema.virtual('totalCollected').get(async function() {
+  try {
+    const Contribution = mongoose.model('Contribution');
+    
+    const result = await Contribution.aggregate([
+      {
+        $match: {
+          event: this._id,
+          status: 'completed'
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $sum: '$amount' },
+          totalRefunds: { $sum: '$refundAmount' }
+        }
+      }
+    ]);
+    
+    if (result.length > 0) {
+      return result[0].totalAmount - result[0].totalRefunds;
+    }
+    return 0;
+  } catch (error) {
+    console.error('Error calculating total collected:', error);
+    return 0;
+  }
+});
+
 eventSchema.virtual('participantCount', {
   ref: 'Participant',
   localField: '_id',

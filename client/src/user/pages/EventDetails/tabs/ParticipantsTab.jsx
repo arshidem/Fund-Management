@@ -4,25 +4,44 @@ import { useContributionService } from "../../../../services/contributionService
 import AddOfflineContributionModal from "../components/AddOfflineContributionModal";
 import ParticipantDetailsModal from "../components/ParticipantDetailsModal";
 import BulkActionsPanel from "../components/BulkActionsPanel";
-import { 
-  FaUserPlus, FaMoneyBillWave, FaSearch, FaFilter, FaCheck, 
-  FaTimes, FaBell, FaEnvelope, FaUserCheck, FaUserSlash,
-  FaListAlt, FaDownload, FaTrash, FaEdit, FaEye,
-  FaKeyboard, FaMousePointer
+import {
+  FaUserPlus,
+  FaMoneyBillWave,
+  FaSearch,
+  FaFilter,
+  FaCheck,
+  FaTimes,
+  FaBell,
+  FaEnvelope,
+  FaUserCheck,
+  FaUserSlash,
+  FaListAlt,
+  FaDownload,
+  FaTrash,
+  FaEdit,
+  FaEye,
+  FaKeyboard,
+  FaMousePointer,
 } from "react-icons/fa";
 
-const ParticipantsTab = ({ event, user, isEventCreator, formatCurrency, formatDate }) => {
-  const { 
-    fetchEventParticipants, 
-    updateParticipantStatus, 
+const ParticipantsTab = ({
+  event,
+  user,
+  isEventCreator,
+  formatCurrency,
+  formatDate,
+}) => {
+  const {
+    fetchEventParticipants,
+    updateParticipantStatus,
     removeParticipant,
-    fetchParticipantDetails 
+    fetchParticipantDetails,
   } = useParticipantService();
-  
-  const { 
+
+  const {
     createOfflineContribution,
     updateContributionStatus,
-    fetchEventContributions
+    fetchEventContributions,
   } = useContributionService();
 
   const [participants, setParticipants] = useState([]);
@@ -31,17 +50,17 @@ const ParticipantsTab = ({ event, user, isEventCreator, formatCurrency, formatDa
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [paymentFilter, setPaymentFilter] = useState("all");
-  
+
   // Selection State
   const [selectedParticipants, setSelectedParticipants] = useState(new Set());
   const [currentSelectedIndex, setCurrentSelectedIndex] = useState(0);
-  
+
   // Modal States
   const [showOfflineModal, setShowOfflineModal] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedParticipant, setSelectedParticipant] = useState(null);
   const [participantContributions, setParticipantContributions] = useState([]);
-  
+
   // UI States
   const [showKeyboardHelp, setShowKeyboardHelp] = useState(false);
   const [actionLoading, setActionLoading] = useState(null);
@@ -59,10 +78,11 @@ const ParticipantsTab = ({ event, user, isEventCreator, formatCurrency, formatDa
   useEffect(() => {
     const handleKeyPress = (e) => {
       // Don't trigger if user is typing in input
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-      
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")
+        return;
+
       // Ctrl/Cmd + K to focus search
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
         e.preventDefault();
         searchInputRef.current?.focus();
         return;
@@ -71,46 +91,46 @@ const ParticipantsTab = ({ event, user, isEventCreator, formatCurrency, formatDa
       // Only process shortcuts if we have participants
       if (filteredParticipants.length === 0) return;
 
-      switch(e.key) {
-        case 'j': // Next participant
+      switch (e.key) {
+        case "j": // Next participant
           e.preventDefault();
-          handleNavigate('down');
+          handleNavigate("down");
           break;
-        case 'k': // Previous participant
+        case "k": // Previous participant
           e.preventDefault();
-          handleNavigate('up');
+          handleNavigate("up");
           break;
-        case ' ': // Select participant
+        case " ": // Select participant
           e.preventDefault();
           toggleParticipantSelection(currentSelectedIndex);
           break;
-        case 'a': // Select all
+        case "a": // Select all
           if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
             handleSelectAll();
           }
           break;
-        case 'v': // Verify payment
+        case "v": // Verify payment
           e.preventDefault();
           handleQuickVerify();
           break;
-        case 'r': // Send reminder
+        case "r": // Send reminder
           e.preventDefault();
           handleQuickReminder();
           break;
-        case 'd': // View details
+        case "d": // View details
           e.preventDefault();
           handleViewDetails();
           break;
-        case 'c': // Add contribution
+        case "c": // Add contribution
           e.preventDefault();
           handleQuickAddContribution();
           break;
-        case '?': // Show help
+        case "?": // Show help
           e.preventDefault();
           setShowKeyboardHelp(true);
           break;
-        case 'Escape': // Clear selection
+        case "Escape": // Clear selection
           e.preventDefault();
           setSelectedParticipants(new Set());
           setCurrentSelectedIndex(0);
@@ -118,8 +138,8 @@ const ParticipantsTab = ({ event, user, isEventCreator, formatCurrency, formatDa
       }
     };
 
-    document.addEventListener('keydown', handleKeyPress);
-    return () => document.removeEventListener('keydown', handleKeyPress);
+    document.addEventListener("keydown", handleKeyPress);
+    return () => document.removeEventListener("keydown", handleKeyPress);
   }, [filteredParticipants, currentSelectedIndex, selectedParticipants]);
 
   const loadParticipants = async () => {
@@ -137,39 +157,47 @@ const ParticipantsTab = ({ event, user, isEventCreator, formatCurrency, formatDa
       setLoading(false);
     }
   };
-const filterParticipants = () => {
-  const filtered = participants.filter(participant => {
-    // Check if participant.user exists before accessing properties
-    if (!participant.user) {
-      return false; // Skip participants with no user data
+  const filterParticipants = () => {
+    const filtered = participants.filter((participant) => {
+      // Check if participant.user exists before accessing properties
+      if (!participant.user) {
+        return false; // Skip participants with no user data
+      }
+
+      const matchesSearch =
+        participant.user.name
+          ?.toLowerCase()
+          .includes(searchTerm.toLowerCase()) ||
+        participant.user.email
+          ?.toLowerCase()
+          .includes(searchTerm.toLowerCase());
+
+      const matchesStatus =
+        statusFilter === "all" || participant.status === statusFilter;
+      const matchesPayment =
+        paymentFilter === "all" || participant.paymentStatus === paymentFilter;
+
+      return matchesSearch && matchesStatus && matchesPayment;
+    });
+    setFilteredParticipants(filtered);
+
+    // Reset selection when filters change
+    if (filtered.length > 0 && currentSelectedIndex >= filtered.length) {
+      setCurrentSelectedIndex(0);
     }
-    
-    const matchesSearch = 
-      participant.user.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      participant.user.email?.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesStatus = statusFilter === "all" || participant.status === statusFilter;
-    const matchesPayment = paymentFilter === "all" || participant.paymentStatus === paymentFilter;
-    
-    return matchesSearch && matchesStatus && matchesPayment;
-  });
-  setFilteredParticipants(filtered);
-  
-  // Reset selection when filters change
-  if (filtered.length > 0 && currentSelectedIndex >= filtered.length) {
-    setCurrentSelectedIndex(0);
-  }
-};
+  };
 
   // Navigation
   const handleNavigate = (direction) => {
     if (filteredParticipants.length === 0) return;
-    
+
     let newIndex;
-    if (direction === 'down') {
+    if (direction === "down") {
       newIndex = (currentSelectedIndex + 1) % filteredParticipants.length;
     } else {
-      newIndex = (currentSelectedIndex - 1 + filteredParticipants.length) % filteredParticipants.length;
+      newIndex =
+        (currentSelectedIndex - 1 + filteredParticipants.length) %
+        filteredParticipants.length;
     }
     setCurrentSelectedIndex(newIndex);
   };
@@ -192,7 +220,7 @@ const filterParticipants = () => {
     if (selectedParticipants.size === filteredParticipants.length) {
       setSelectedParticipants(new Set());
     } else {
-      const allIds = new Set(filteredParticipants.map(p => p._id));
+      const allIds = new Set(filteredParticipants.map((p) => p._id));
       setSelectedParticipants(allIds);
     }
   };
@@ -203,26 +231,32 @@ const filterParticipants = () => {
   };
 
   // Quick Actions
+
   const handleQuickAddContribution = async () => {
     const participant = filteredParticipants[currentSelectedIndex];
     if (!participant) return;
 
-    setActionLoading('add-contribution');
+    setActionLoading("add-contribution");
     try {
       // Add quick payment of minimum contribution amount
-      const amount = event.minimumContribution - participant.totalContributed > 0 
-        ? event.minimumContribution - participant.totalContributed 
-        : event.minimumContribution;
+      const amount =
+        event.minimumContribution - participant.totalContributed > 0
+          ? event.minimumContribution - participant.totalContributed
+          : event.minimumContribution;
 
       await createOfflineContribution(event._id, {
         amount,
-        paymentMethod: 'cash',
+        paymentMethod: "cash",
         transactionId: `QUICK_${Date.now()}`,
-        userId: participant.user._id,
+        userId: participant.user._id, // This should be participant's user ID
+        participantId: participant._id, // Add participant ID
+        createdBy: user._id, // Admin who is creating this payment
       });
-      
+
       await loadParticipants();
-      alert(`Added ${formatCurrency(amount)} payment for ${participant.user.name}`);
+      alert(
+        `Added ${formatCurrency(amount)} payment for ${participant.user.name}`
+      );
     } catch (error) {
       console.error("Error adding quick contribution:", error);
       alert("Failed to add payment: " + error.message);
@@ -230,24 +264,23 @@ const filterParticipants = () => {
       setActionLoading(null);
     }
   };
-
   const handleQuickVerify = async () => {
     const participant = filteredParticipants[currentSelectedIndex];
     if (!participant) return;
 
-    setActionLoading('verify');
+    setActionLoading("verify");
     try {
       // Get participant's pending contributions
       const contributionsData = await fetchEventContributions(event._id, {
-        userId: participant.user._id,
-        status: 'pending'
+        userId: participant.user._id, // Use participant's user ID
+        status: "pending",
       });
 
       if (contributionsData.contributions?.length > 0) {
         // Verify the first pending contribution
         await updateContributionStatus(contributionsData.contributions[0]._id, {
-          status: 'completed',
-          verifiedBy: user._id
+          status: "completed",
+          verifiedBy: user._id, // Admin who is verifying
         });
         await loadParticipants();
         alert(`Verified payment for ${participant.user.name}`);
@@ -266,11 +299,11 @@ const filterParticipants = () => {
     const participant = filteredParticipants[currentSelectedIndex];
     if (!participant) return;
 
-    setActionLoading('reminder');
+    setActionLoading("reminder");
     try {
       // Simulate sending reminder (implement your actual notification service)
       console.log(`Sending payment reminder to ${participant.user.email}`);
-      
+
       // Show confirmation
       alert(`Payment reminder sent to ${participant.user.name}`);
     } catch (error) {
@@ -285,13 +318,13 @@ const filterParticipants = () => {
     const participant = filteredParticipants[currentSelectedIndex];
     if (!participant) return;
 
-    setActionLoading('details');
+    setActionLoading("details");
     try {
       const details = await fetchParticipantDetails(participant._id);
       const contributions = await fetchEventContributions(event._id, {
-        userId: participant.user._id
+        userId: participant.user._id,
       });
-      
+
       setSelectedParticipant(details.participant);
       setParticipantContributions(contributions.contributions || []);
       setShowDetailsModal(true);
@@ -323,9 +356,11 @@ const filterParticipants = () => {
     try {
       await createOfflineContribution(event._id, {
         ...contributionData,
-        userId: selectedParticipant.user._id,
+        userId: selectedParticipant.user._id, // Participant's user ID
+        participantId: selectedParticipant._id, // Participant ID
+        createdBy: user._id, // Admin who is creating this payment
       });
-      
+
       await loadParticipants();
       setShowOfflineModal(false);
       setSelectedParticipant(null);
@@ -341,14 +376,16 @@ const filterParticipants = () => {
     if (selectedParticipants.size === 0) return;
 
     try {
-      const promises = Array.from(selectedParticipants).map(participantId =>
+      const promises = Array.from(selectedParticipants).map((participantId) =>
         updateParticipantStatus(participantId, { status: newStatus })
       );
-      
+
       await Promise.all(promises);
       await loadParticipants();
       clearSelection();
-      alert(`Updated ${selectedParticipants.size} participants to ${newStatus}`);
+      alert(
+        `Updated ${selectedParticipants.size} participants to ${newStatus}`
+      );
     } catch (error) {
       console.error("Error in bulk status update:", error);
       alert("Failed to update some participants");
@@ -361,11 +398,13 @@ const filterParticipants = () => {
     try {
       // Simulate bulk reminders
       const selectedNames = filteredParticipants
-        .filter(p => selectedParticipants.has(p._id))
-        .map(p => p.user.name);
-      
+        .filter((p) => selectedParticipants.has(p._id))
+        .map((p) => p.user.name);
+
       console.log(`Sending reminders to:`, selectedNames);
-      alert(`Sent payment reminders to ${selectedParticipants.size} participants`);
+      alert(
+        `Sent payment reminders to ${selectedParticipants.size} participants`
+      );
       clearSelection();
     } catch (error) {
       console.error("Error sending bulk reminders:", error);
@@ -375,34 +414,54 @@ const filterParticipants = () => {
 
   const getPaymentStatusColor = (status) => {
     switch (status) {
-      case 'paid': return 'text-green-400 bg-green-900/20';
-      case 'overpaid': return 'text-purple-400 bg-purple-900/20';
-      case 'partial': return 'text-yellow-400 bg-yellow-900/20';
-      case 'pending': return 'text-red-400 bg-red-900/20';
-      default: return 'text-gray-400 bg-gray-900/20';
+      case "paid":
+        return "text-green-400 bg-green-900/20";
+      case "overpaid":
+        return "text-purple-400 bg-purple-900/20";
+      case "partial":
+        return "text-yellow-400 bg-yellow-900/20";
+      case "pending":
+        return "text-red-400 bg-red-900/20";
+      default:
+        return "text-gray-400 bg-gray-900/20";
     }
   };
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'active': return 'text-green-400 bg-green-900/20';
-      case 'waitlisted': return 'text-yellow-400 bg-yellow-900/20';
-      case 'invited': return 'text-blue-400 bg-blue-900/20';
-      case 'cancelled': return 'text-red-400 bg-red-900/20';
-      case 'removed': return 'text-gray-400 bg-gray-900/20';
-      default: return 'text-gray-400 bg-gray-900/20';
+      case "active":
+        return "text-green-400 bg-green-900/20";
+      case "waitlisted":
+        return "text-yellow-400 bg-yellow-900/20";
+      case "invited":
+        return "text-blue-400 bg-blue-900/20";
+      case "cancelled":
+        return "text-red-400 bg-red-900/20";
+      case "removed":
+        return "text-gray-400 bg-gray-900/20";
+      default:
+        return "text-gray-400 bg-gray-900/20";
     }
   };
 
-  const QuickActionButton = ({ icon, label, onClick, color = "blue", loading }) => (
+  const QuickActionButton = ({
+    icon,
+    label,
+    onClick,
+    color = "blue",
+    loading,
+  }) => (
     <button
       onClick={onClick}
       disabled={loading}
       className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-all duration-200 ${
-        color === 'green' ? 'bg-green-600 hover:bg-green-500' :
-        color === 'red' ? 'bg-red-600 hover:bg-red-500' :
-        color === 'yellow' ? 'bg-yellow-600 hover:bg-yellow-500' :
-        'bg-blue-600 hover:bg-blue-500'
+        color === "green"
+          ? "bg-green-600 hover:bg-green-500"
+          : color === "red"
+          ? "bg-red-600 hover:bg-red-500"
+          : color === "yellow"
+          ? "bg-yellow-600 hover:bg-yellow-500"
+          : "bg-blue-600 hover:bg-blue-500"
       } text-white disabled:opacity-50 disabled:cursor-not-allowed`}
       title={label}
     >
@@ -421,8 +480,11 @@ const filterParticipants = () => {
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-gray-300 dark:bg-gray-700 rounded w-1/4"></div>
           <div className="h-4 bg-gray-300 dark:bg-gray-700 rounded w-1/2"></div>
-          {[1, 2, 3].map(i => (
-            <div key={i} className="h-16 bg-gray-300 dark:bg-gray-700 rounded"></div>
+          {[1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="h-16 bg-gray-300 dark:bg-gray-700 rounded"
+            ></div>
           ))}
         </div>
       </div>
@@ -436,47 +498,70 @@ const filterParticipants = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-md w-full">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Keyboard Shortcuts</h3>
-              <button onClick={() => setShowKeyboardHelp(false)} className="text-gray-500 hover:text-gray-700">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                Keyboard Shortcuts
+              </h3>
+              <button
+                onClick={() => setShowKeyboardHelp(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
                 <FaTimes />
               </button>
             </div>
             <div className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
               <div className="flex justify-between">
                 <span>Navigate:</span>
-                <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">j/k</kbd>
+                <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">
+                  j/k
+                </kbd>
               </div>
               <div className="flex justify-between">
                 <span>Select participant:</span>
-                <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">Space</kbd>
+                <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">
+                  Space
+                </kbd>
               </div>
               <div className="flex justify-between">
                 <span>Add payment:</span>
-                <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">c</kbd>
+                <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">
+                  c
+                </kbd>
               </div>
               <div className="flex justify-between">
                 <span>Verify payment:</span>
-                <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">v</kbd>
+                <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">
+                  v
+                </kbd>
               </div>
               <div className="flex justify-between">
                 <span>Send reminder:</span>
-                <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">r</kbd>
+                <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">
+                  r
+                </kbd>
               </div>
               <div className="flex justify-between">
                 <span>View details:</span>
-                <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">d</kbd>
+                <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">
+                  d
+                </kbd>
               </div>
               <div className="flex justify-between">
                 <span>Select all:</span>
-                <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">Ctrl+A</kbd>
+                <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">
+                  Ctrl+A
+                </kbd>
               </div>
               <div className="flex justify-between">
                 <span>Clear selection:</span>
-                <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">Esc</kbd>
+                <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">
+                  Esc
+                </kbd>
               </div>
               <div className="flex justify-between">
                 <span>Focus search:</span>
-                <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">Ctrl+K</kbd>
+                <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">
+                  Ctrl+K
+                </kbd>
               </div>
             </div>
           </div>
@@ -488,7 +573,9 @@ const filterParticipants = () => {
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-4 gap-4">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white">Participants</h3>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                Participants
+              </h3>
               <button
                 onClick={() => setShowKeyboardHelp(true)}
                 className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
@@ -498,8 +585,13 @@ const filterParticipants = () => {
               </button>
             </div>
             <p className="text-gray-600 dark:text-gray-400 text-sm">
-              {filteredParticipants.length} of {event.participationType === 'unlimited' ? '∞' : event.maxParticipants} participants
-              {selectedParticipants.size > 0 && ` • ${selectedParticipants.size} selected`}
+              {filteredParticipants.length} of{" "}
+              {event.participationType === "unlimited"
+                ? "∞"
+                : event.maxParticipants}{" "}
+              participants
+              {selectedParticipants.size > 0 &&
+                ` • ${selectedParticipants.size} selected`}
             </p>
           </div>
 
@@ -560,10 +652,12 @@ const filterParticipants = () => {
       {filteredParticipants.length === 0 ? (
         <div className="bg-white dark:bg-gray-800 rounded-xl p-8 border border-gray-200 dark:border-gray-700 shadow-sm text-center">
           <FaUserPlus className="text-5xl text-gray-400 dark:text-gray-600 mx-auto mb-4" />
-          <p className="text-gray-600 dark:text-gray-400 text-lg">No participants found</p>
+          <p className="text-gray-600 dark:text-gray-400 text-lg">
+            No participants found
+          </p>
           <p className="text-gray-500 dark:text-gray-500 text-sm mt-2">
-            {searchTerm || statusFilter !== 'all' || paymentFilter !== 'all' 
-              ? "Try adjusting your filters" 
+            {searchTerm || statusFilter !== "all" || paymentFilter !== "all"
+              ? "Try adjusting your filters"
               : "Be the first to join this event!"}
           </p>
         </div>
@@ -574,7 +668,10 @@ const filterParticipants = () => {
             <div className="flex items-center gap-3">
               <input
                 type="checkbox"
-                checked={selectedParticipants.size === filteredParticipants.length && filteredParticipants.length > 0}
+                checked={
+                  selectedParticipants.size === filteredParticipants.length &&
+                  filteredParticipants.length > 0
+                }
                 onChange={handleSelectAll}
                 className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
               />
@@ -597,11 +694,11 @@ const filterParticipants = () => {
             <div
               key={participant._id}
               className={`bg-white dark:bg-gray-800 rounded-xl p-4 border-2 transition-all duration-200 ${
-                index === currentSelectedIndex 
-                  ? 'border-blue-500 dark:border-blue-400 shadow-md' 
+                index === currentSelectedIndex
+                  ? "border-blue-500 dark:border-blue-400 shadow-md"
                   : selectedParticipants.has(participant._id)
-                  ? 'border-green-500 dark:border-green-400 shadow-sm'
-                  : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                  ? "border-green-500 dark:border-green-400 shadow-sm"
+                  : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
               }`}
               onClick={() => setCurrentSelectedIndex(index)}
             >
@@ -614,35 +711,43 @@ const filterParticipants = () => {
                     onChange={() => toggleParticipantSelection(index)}
                     className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600 mt-1"
                   />
-                  
+
                   <div className="flex items-center gap-4 flex-1 min-w-0">
                     <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0">
                       {participant.user.name?.charAt(0).toUpperCase()}
                     </div>
-                    
+
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <p className="font-semibold text-gray-900 dark:text-white truncate">
                           {participant.user.name}
                         </p>
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(participant.status)}`}>
+                        <span
+                          className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(
+                            participant.status
+                          )}`}
+                        >
                           {participant.status}
                         </span>
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getPaymentStatusColor(participant.paymentStatus)}`}>
+                        <span
+                          className={`px-2 py-1 rounded-full text-xs font-medium ${getPaymentStatusColor(
+                            participant.paymentStatus
+                          )}`}
+                        >
                           {participant.paymentStatus}
                         </span>
                       </div>
-                      
+
                       <p className="text-gray-600 dark:text-gray-400 text-sm truncate">
                         {participant.user.email}
                       </p>
-                      
+
                       {participant.user.phone && (
                         <p className="text-gray-500 dark:text-gray-500 text-sm">
                           {participant.user.phone}
                         </p>
                       )}
-                      
+
                       <p className="text-gray-500 dark:text-gray-500 text-xs mt-1">
                         Joined {formatDate(participant.joinedAt)}
                       </p>
@@ -662,64 +767,85 @@ const filterParticipants = () => {
                         Remaining: {formatCurrency(participant.remainingAmount)}
                       </p>
                     )}
-                    
+
                     {/* Payment Progress */}
                     <div className="w-32 bg-gray-200 dark:bg-gray-700 h-2 rounded-full overflow-hidden mt-1">
-                      <div 
+                      <div
                         className="bg-green-500 h-full transition-all duration-500"
-                        style={{ width: `${Math.min(100, participant.paymentPercentage)}%` }}
+                        style={{
+                          width: `${Math.min(
+                            100,
+                            participant.paymentPercentage
+                          )}%`,
+                        }}
                       ></div>
                     </div>
                   </div>
 
                   {/* Quick Actions */}
+                  {/* Quick Actions - Only show for Event Creator/Admin */}
                   {isEventCreator && (
                     <div className="flex flex-wrap gap-1">
                       <QuickActionButton
                         icon={<FaMoneyBillWave className="text-xs" />}
                         label="Add Payment"
-                        onClick={() => handleAddOfflineContribution(participant)}
+                        onClick={() =>
+                          handleAddOfflineContribution(participant)
+                        }
                         color="green"
                       />
-                      
+
                       <QuickActionButton
                         icon={<FaCheck className="text-xs" />}
                         label="Verify"
                         onClick={() => handleQuickVerify()}
                         color="blue"
-                        loading={actionLoading === 'verify' && index === currentSelectedIndex}
+                        loading={
+                          actionLoading === "verify" &&
+                          index === currentSelectedIndex
+                        }
                       />
-                      
+
                       <QuickActionButton
                         icon={<FaBell className="text-xs" />}
                         label="Remind"
                         onClick={() => handleQuickReminder()}
                         color="yellow"
-                        loading={actionLoading === 'reminder' && index === currentSelectedIndex}
+                        loading={
+                          actionLoading === "reminder" &&
+                          index === currentSelectedIndex
+                        }
                       />
-                      
+
                       <QuickActionButton
                         icon={<FaEye className="text-xs" />}
                         label="Details"
                         onClick={() => handleViewDetails()}
                         color="blue"
-                        loading={actionLoading === 'details' && index === currentSelectedIndex}
+                        loading={
+                          actionLoading === "details" &&
+                          index === currentSelectedIndex
+                        }
                       />
 
-                      {participant.status === 'waitlisted' && (
+                      {participant.status === "waitlisted" && (
                         <QuickActionButton
                           icon={<FaUserCheck className="text-xs" />}
                           label="Activate"
-                          onClick={() => handleStatusUpdate(participant._id, 'active')}
+                          onClick={() =>
+                            handleStatusUpdate(participant._id, "active")
+                          }
                           color="green"
                         />
                       )}
 
-                      {participant.status === 'active' && (
+                      {participant.status === "active" && (
                         <QuickActionButton
                           icon={<FaUserSlash className="text-xs" />}
                           label="Cancel"
-                          onClick={() => handleStatusUpdate(participant._id, 'cancelled')}
+                          onClick={() =>
+                            handleStatusUpdate(participant._id, "cancelled")
+                          }
                           color="red"
                         />
                       )}

@@ -186,8 +186,8 @@ contributionSchema.statics.getUserTotalContributions = function(userId, eventId)
   return this.aggregate([
     {
       $match: {
-        user: mongoose.Types.ObjectId(userId),
-        event: mongoose.Types.ObjectId(eventId),
+        user:new mongoose.Types.ObjectId(userId),
+        event:new mongoose.Types.ObjectId(eventId),
         status: 'completed'
       }
     },
@@ -203,36 +203,52 @@ contributionSchema.statics.getUserTotalContributions = function(userId, eventId)
   ]);
 };
 
-contributionSchema.statics.getEventContributionsSummary = function(eventId) {
-  return this.aggregate([
-    {
-      $match: {
-        event: mongoose.Types.ObjectId(eventId),
-        status: 'completed'
-      }
-    },
-    {
-      $group: {
-        _id: '$paymentMethod',
-        totalAmount: { $sum: '$amount' },
-        totalRefunds: { $sum: '$refundAmount' },
-        netAmount: { $sum: { $subtract: ['$amount', '$refundAmount'] } },
-        contributionCount: { $sum: 1 }
-      }
-    },
-    {
-      $project: {
-        paymentMethod: '$_id',
-        totalAmount: 1,
-        totalRefunds: 1,
-        netAmount: 1,
-        contributionCount: 1,
-        _id: 0
-      }
+contributionSchema.post('save', async function(doc) {
+  // Update participant's total contribution when payment is completed
+  if (doc.status === 'completed' || doc.status === 'refunded') {
+    try {
+      // Use mongoose.connection.model to avoid circular dependencies
+      const Participant = mongoose.connection.model('Participant');
+      const Contribution = mongoose.connection.model('Contribution');
+      
+      // Calculate total contributions using aggregation
+      const totalContributions = await Contribution.aggregate([
+        {
+          $match: {
+            user: doc.user,
+            event: doc.event,
+            status: 'completed'
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalAmount: { $sum: '$amount' },
+            totalRefunds: { $sum: '$refundAmount' },
+            netAmount: { $sum: { $subtract: ['$amount', '$refundAmount'] } }
+          }
+        }
+      ]);
+      
+      const netAmount = totalContributions.length > 0 ? totalContributions[0].netAmount : 0;
+      
+      // Update participant
+      await Participant.findOneAndUpdate(
+        { event: doc.event, user: doc.user },
+        { 
+          totalContributed: netAmount,
+          lastPaymentDate: doc.paymentDate,
+          updatedAt: new Date()
+        },
+        { upsert: false } // Don't create if doesn't exist
+      );
+      
+    } catch (error) {
+      console.error('Error updating participant contribution:', error);
+      // Don't throw error in post middleware as it can't be caught
     }
-  ]);
-};
-
+  }
+});
 contributionSchema.statics.findSuccessfulPayments = function(eventId) {
   return this.find({
     event: eventId,
@@ -243,52 +259,46 @@ contributionSchema.statics.findSuccessfulPayments = function(eventId) {
 };
 
 // ==================== MIDDLEWARE ====================
-contributionSchema.pre('save', function(next) {
-  // Auto-set createdBy if not provided (for system-generated payments)
-  if (!this.createdBy && this.user) {
-    this.createdBy = this.user;
-  }
-  
-  // Validate refund amount
-  if (this.refundAmount > this.amount) {
-    return next(new Error('Refund amount cannot exceed original amount'));
-  }
-  
-  // Auto-set refund date when refund is processed
-  if (this.status === 'refunded' && !this.refundDate) {
-    this.refundDate = new Date();
-  }
-  
-  next();
-});
 contributionSchema.post('save', async function(doc) {
   // Update participant's total contribution when payment is completed
   if (doc.status === 'completed' || doc.status === 'refunded') {
     try {
-      const Participant = mongoose.model('Participant');
-      const Contribution = mongoose.model('Contribution');
+      // Use mongoose.connection.model to avoid circular dependencies
+      const Participant = mongoose.connection.model('Participant');
+      const Contribution = mongoose.connection.model('Contribution');
       
-      // Use the model directly instead of this.constructor
-      const totalContributions = await Contribution.getUserTotalContributions(doc.user, doc.event);
+      // Calculate total contributions using aggregation
+      const totalContributions = await Contribution.aggregate([
+        {
+          $match: {
+            user: doc.user,
+            event: doc.event,
+            status: 'completed'
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalAmount: { $sum: '$amount' },
+            totalRefunds: { $sum: '$refundAmount' },
+            netAmount: { $sum: { $subtract: ['$amount', '$refundAmount'] } }
+          }
+        }
+      ]);
       
-      if (totalContributions.length > 0) {
-        await Participant.findOneAndUpdate(
-          { event: doc.event, user: doc.user },
-          { 
-            totalContributed: totalContributions[0].netAmount,
-            lastPaymentDate: doc.paymentDate
-          }
-        );
-      } else {
-        // If no contributions found, set to 0
-        await Participant.findOneAndUpdate(
-          { event: doc.event, user: doc.user },
-          { 
-            totalContributed: 0,
-            lastPaymentDate: doc.paymentDate
-          }
-        );
-      }
+      const netAmount = totalContributions.length > 0 ? totalContributions[0].netAmount : 0;
+      
+      // Update participant
+      await Participant.findOneAndUpdate(
+        { event: doc.event, user: doc.user },
+        { 
+          totalContributed: netAmount,
+          lastPaymentDate: doc.paymentDate,
+          updatedAt: new Date()
+        },
+        { upsert: false } // Don't create if doesn't exist
+      );
+      
     } catch (error) {
       console.error('Error updating participant contribution:', error);
       // Don't throw error in post middleware as it can't be caught

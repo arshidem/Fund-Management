@@ -22,6 +22,7 @@ const EventDetails = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
   const [imageError, setImageError] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   useEffect(() => {
     const loadEvent = async () => {
@@ -29,26 +30,57 @@ const EventDetails = () => {
         const data = await fetchEventById(eventId);
         setEvent(data.event);
       } catch (error) {
-        console.error(error.message);
+        console.error("Error loading event:", error.message);
       } finally {
         setLoading(false);
       }
     };
     loadEvent();
-  }, [eventId]);
+  }, [eventId, refreshTrigger]);
+
+  const refreshEventData = () => {
+    setRefreshTrigger(prev => prev + 1);
+  };
+
+  const handleParticipationChange = (isParticipating, participantData) => {
+    // Update event data optimistically when participation changes
+    setEvent(prevEvent => {
+      if (!prevEvent) return prevEvent;
+      
+      const newParticipantCount = isParticipating 
+        ? (prevEvent.participantCount || 0) + 1
+        : Math.max(0, (prevEvent.participantCount || 1) - 1);
+
+      return {
+        ...prevEvent,
+        participantCount: newParticipantCount,
+        // Update other relevant fields if needed
+        updatedAt: new Date().toISOString()
+      };
+    });
+
+    // Optionally refresh the entire event data
+    setTimeout(() => {
+      refreshEventData();
+    }, 500);
+  };
 
   const handleImageError = () => {
     setImageError(true);
   };
 
   const formatCurrency = (amount) => {
+    if (!amount && amount !== 0) return "₹0";
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
       currency: event?.currency || 'INR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
     }).format(amount);
   };
 
   const formatDate = (date) => {
+    if (!date) return "Not set";
     return new Date(date).toLocaleDateString('en-IN', {
       weekday: 'long',
       year: 'numeric',
@@ -58,10 +90,31 @@ const EventDetails = () => {
   };
 
   const formatTime = (time) => {
+    if (!time) return "Not set";
     return new Date(`2000-01-01T${time}`).toLocaleTimeString('en-IN', {
       hour: '2-digit',
       minute: '2-digit',
     });
+  };
+
+  const getDaysRemaining = (eventDate) => {
+    if (!eventDate) return 0;
+    const today = new Date();
+    const eventDay = new Date(eventDate);
+    const diffTime = eventDay - today;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays;
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'published': return 'bg-green-500';
+      case 'draft': return 'bg-gray-500';
+      case 'cancelled': return 'bg-red-500';
+      case 'completed': return 'bg-blue-500';
+      case 'ongoing': return 'bg-yellow-500';
+      default: return 'bg-gray-500';
+    }
   };
 
   if (loading) {
@@ -89,6 +142,7 @@ const EventDetails = () => {
   }
 
   const isEventCreator = user?._id === event.createdBy?._id;
+  const daysRemaining = getDaysRemaining(event.date);
 
   const tabs = [
     { id: "overview", label: "Overview", icon: FaGlobe },
@@ -97,7 +151,13 @@ const EventDetails = () => {
     { id: "participants", label: "Participants", icon: FaUsers },
     { id: "contributions", label: "Contributions", icon: FaMoneyBillWave },
     { id: "expenses", label: "Expenses", icon: FaReceipt },
-  ];
+  ].filter(tab => {
+    // Hide financial tabs if user is not event creator and event has restricted visibility
+    if (['financials', 'expenses'].includes(tab.id) && !isEventCreator && event.visibility === 'private') {
+      return false;
+    }
+    return true;
+  });
 
   const renderTabContent = () => {
     const commonProps = {
@@ -107,6 +167,8 @@ const EventDetails = () => {
       formatCurrency,
       formatDate,
       formatTime,
+      onParticipationChange: handleParticipationChange,
+      onEventUpdate: refreshEventData, // Add this for other tabs to refresh data
     };
 
     switch (activeTab) {
@@ -146,21 +208,21 @@ const EventDetails = () => {
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent flex flex-col justify-end p-6">
           <div className="flex justify-between items-end">
             <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2">
-                <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                  event.status === 'published' ? 'bg-green-500' :
-                  event.status === 'draft' ? 'bg-gray-500' :
-                  event.status === 'cancelled' ? 'bg-red-500' :
-                  event.status === 'completed' ? 'bg-blue-500' : 'bg-yellow-500'
-                } text-white`}>
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(event.status)} text-white`}>
                   {event.status?.toUpperCase()}
                 </span>
                 <span className="px-3 py-1 bg-purple-500 rounded-full text-xs font-semibold text-white">
-                  {event.category?.toUpperCase()}
+                  {event.category?.toUpperCase() || 'GENERAL'}
                 </span>
                 <span className="px-3 py-1 bg-orange-500 rounded-full text-xs font-semibold text-white">
-                  {event.eventType?.toUpperCase()}
+                  {event.eventType?.toUpperCase() || 'IN-PERSON'}
                 </span>
+                {event.visibility === 'private' && (
+                  <span className="px-3 py-1 bg-red-500 rounded-full text-xs font-semibold text-white">
+                    PRIVATE
+                  </span>
+                )}
               </div>
               <h1 className="text-4xl font-bold text-white mb-2">{event.title}</h1>
               <p className="text-gray-300 text-lg mb-4 line-clamp-2">{event.description}</p>
@@ -181,12 +243,13 @@ const EventDetails = () => {
                   <div className="flex items-center gap-1">
                     <FaReceipt className="text-red-400" />
                     <span>{event.location.city}</span>
+                    {event.location.state && <span>, {event.location.state}</span>}
                   </div>
                 )}
                 <div className="flex items-center gap-1">
                   <FaUsers className="text-yellow-400" />
                   <span>
-                    {event.participantCount || 0} / {event.participationType === 'unlimited' ? '∞' : event.maxParticipants} participants
+                    {event.participantCount || 0} / {event.participationType === 'unlimited' ? '∞' : event.maxParticipants || 0} participants
                   </span>
                 </div>
               </div>
@@ -204,7 +267,7 @@ const EventDetails = () => {
             </div>
             <div>
               <p className="text-gray-400 text-sm">Total Collected</p>
-              <p className="text-white font-bold text-lg">{formatCurrency(event.totalCollected)}</p>
+              <p className="text-white font-bold text-lg">{formatCurrency(event.totalCollected || 0)}</p>
             </div>
           </div>
         </div>
@@ -216,7 +279,7 @@ const EventDetails = () => {
             </div>
             <div>
               <p className="text-gray-400 text-sm">Budget Progress</p>
-              <p className="text-white font-bold text-lg">{event.paymentProgress?.toFixed(1)}%</p>
+              <p className="text-white font-bold text-lg">{event.paymentProgress?.toFixed(1) || 0}%</p>
             </div>
           </div>
         </div>
@@ -228,7 +291,7 @@ const EventDetails = () => {
             </div>
             <div>
               <p className="text-gray-400 text-sm">Min Contribution</p>
-              <p className="text-white font-bold text-lg">{formatCurrency(event.minimumContribution)}</p>
+              <p className="text-white font-bold text-lg">{formatCurrency(event.minimumContribution || 0)}</p>
             </div>
           </div>
         </div>
@@ -240,7 +303,9 @@ const EventDetails = () => {
             </div>
             <div>
               <p className="text-gray-400 text-sm">Days Left</p>
-              <p className="text-white font-bold text-lg">{event.daysRemaining > 0 ? event.daysRemaining : 'Event Passed'}</p>
+              <p className="text-white font-bold text-lg">
+                {daysRemaining > 0 ? daysRemaining : daysRemaining === 0 ? 'Today' : 'Event Passed'}
+              </p>
             </div>
           </div>
         </div>
@@ -248,11 +313,11 @@ const EventDetails = () => {
 
       {/* Tabs Navigation */}
       <div className="px-6">
-        <div className="flex space-x-1 bg-gray-800 rounded-xl p-1 border border-gray-700">
+        <div className="flex space-x-1 bg-gray-800 rounded-xl p-1 border border-gray-700 overflow-x-auto">
           {tabs.map((tab) => (
             <button
               key={tab.id}
-              className={`flex items-center gap-2 py-3 px-4 font-semibold rounded-lg transition-all duration-300 flex-1 justify-center ${
+              className={`flex items-center gap-2 py-3 px-4 font-semibold rounded-lg transition-all duration-300 flex-shrink-0 ${
                 activeTab === tab.id
                   ? "bg-blue-600 text-white shadow-lg"
                   : "text-gray-400 hover:text-white hover:bg-gray-700"
@@ -260,7 +325,7 @@ const EventDetails = () => {
               onClick={() => setActiveTab(tab.id)}
             >
               <tab.icon className="text-sm" />
-              <span className="hidden sm:block">{tab.label}</span>
+              <span className="whitespace-nowrap">{tab.label}</span>
             </button>
           ))}
         </div>

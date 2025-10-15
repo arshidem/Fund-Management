@@ -222,16 +222,16 @@ const updateEvent = async (req, res) => {
     //   return res.status(403).json({ message: 'Not authorized to update this event' });
     // }
 
-    if (event.status === 'published') {
-      const restrictedFields = ['participationType', 'maxParticipants', 'minimumContribution'];
-      const hasRestrictedUpdate = Object.keys(updateData).some(field => 
-        restrictedFields.includes(field)
-      );
+    // if (event.status === 'published') {
+    //   const restrictedFields = ['participationType', 'maxParticipants', 'minimumContribution'];
+    //   const hasRestrictedUpdate = Object.keys(updateData).some(field => 
+    //     restrictedFields.includes(field)
+    //   );
       
-      if (hasRestrictedUpdate) {
-        return res.status(400).json({ message: 'Cannot update participation settings after event is published' });
-      }
-    }
+    //   if (hasRestrictedUpdate) {
+    //     return res.status(400).json({ message: 'Cannot update participation settings after event is published' });
+    //   }
+    // }
 
     Object.keys(updateData).forEach(key => {
       if (updateData[key] !== undefined) {
