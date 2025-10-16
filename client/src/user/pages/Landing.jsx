@@ -21,11 +21,6 @@ console.log(token);
         if (data?.user) {
           setUser(data.user);
 
-          // Check if user is blocked first
-          if (data.user.isBlocked) {
-            navigate("/blocked");
-            return;
-          }
 
           // if user is approved → go dashboard
           if (data.user.isApproved) {
@@ -68,7 +63,7 @@ console.log(token);
   }
 
   // If user exists but not approved, show pending message
-  if (user && !user.isApproved && !user.isBlocked) {
+  if (user && !user.isApproved) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100">
         <div className="bg-white p-8 rounded-lg shadow-md max-w-md w-full text-center">

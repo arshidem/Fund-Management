@@ -243,7 +243,8 @@ const createOfflineContribution = async (req, res) => {
         console.log('✅ FOUND by participantId:', {
           participantId: participant._id,
           participantUserId: participant.user,
-          eventId: participant.event
+          eventId: participant.event,
+          status: participant.status
         });
       } else {
         console.log('❌ NOT FOUND by participantId');
@@ -261,7 +262,8 @@ const createOfflineContribution = async (req, res) => {
         console.log('✅ FOUND by userId:', {
           participantId: participant._id,
           participantUserId: participant.user,
-          eventId: participant.event
+          eventId: participant.event,
+          status: participant.status
         });
       } else {
         console.log('❌ NOT FOUND by userId');
@@ -307,12 +309,25 @@ const createOfflineContribution = async (req, res) => {
     console.log('✅ PARTICIPANT FOUND SUCCESSFULLY:', {
       participantId: participant._id.toString(),
       userId: participant.user?.toString(),
-      eventId: participant.event?.toString()
+      eventId: participant.event?.toString(),
+      status: participant.status
     });
+
+    // ✅ CHECK PARTICIPANT STATUS - ONLY ALLOW ACTIVE PARTICIPANTS
+    console.log('🔍 Checking participant status...');
+    if (participant.status !== 'active') {
+      console.log('❌ Participant status is not active:', participant.status);
+      return res.status(400).json({
+        success: false,
+        message: `Cannot accept contributions for participants with status: ${participant.status}. Only active participants can make contributions.`,
+        participantStatus: participant.status,
+        allowedStatuses: ['active']
+      });
+    }
+    console.log('✅ Participant status is active - allowing contribution');
 
     // Verify admin permissions
     console.log('🔍 Checking admin permissions...');
-
 
     // Create contribution
     console.log('🔍 Creating contribution...');

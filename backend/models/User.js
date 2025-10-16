@@ -11,7 +11,6 @@ const userSchema = new mongoose.Schema({
 
   isActive: { type: Boolean, default: false },
   isApproved: { type: Boolean, default: false },
-  isBlocked: { type: Boolean, default: false }, // <-- New field
 
   role: { type: String, default: "user" },
   lastLogin: { type: Date },

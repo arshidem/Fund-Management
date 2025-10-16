@@ -36,7 +36,7 @@ const NotificationsPage = () => {
   const [userStatuses, setUserStatuses] = useState({});
   const [openDropdown, setOpenDropdown] = useState(null); // Track which dropdown is open
 
-  // Fetch user status for entry approval notifications
+  // Fetch user status for entry approval notifications - Simplified version
   useEffect(() => {
     const fetchUserStatuses = async () => {
       const entryApprovals = notifications.filter(
@@ -48,27 +48,35 @@ const NotificationsPage = () => {
 
         if (!userStatuses[userId]) {
           try {
-            console.log("🔄 Fetching status for user:", userId);
-            const userData = await adminService.getUserById(userId);
+            console.log("🔄 Fetching approval status for user:", userId);
+
+            // Call the service function
+            const response = await adminService.getUserById(userId);
+
+            console.log("📊 Full API response:", response);
+
+            // Access the user data
+            const userData = response.user || response.data || response;
 
             setUserStatuses((prev) => ({
               ...prev,
               [userId]: {
-                isApproved: userData.data.isApproved,
-                isBlocked: userData.data.isBlocked,
-                name: userData.data.name,
-                email: userData.data.email,
+                isApproved:
+                  userData.isApproved || userData.status === "approved",
+                name: userData.name || "Unknown User",
+                email: userData.email || "No email",
               },
             }));
           } catch (error) {
-            console.error("❌ Failed to fetch user status:", error);
+            console.error("❌ Failed to fetch user approval status:", error);
+
             setUserStatuses((prev) => ({
               ...prev,
               [userId]: {
                 isApproved: false,
-                isBlocked: false,
-                name: "Unknown",
-                email: "Unknown",
+                name: "Unknown User",
+                email: "Unknown Email",
+                error: true,
               },
             }));
           }
@@ -79,7 +87,7 @@ const NotificationsPage = () => {
     if (notifications.length > 0) {
       fetchUserStatuses();
     }
-  }, [notifications, adminService]);
+  }, [notifications, adminService, userStatuses]);
 
   // Mark all as read when component mounts
   useEffect(() => {
@@ -185,13 +193,12 @@ const NotificationsPage = () => {
       );
       console.log("✅ User approved successfully:", result);
 
-      // Update local status
+      // Update local status - only approval status
       setUserStatuses((prev) => ({
         ...prev,
         [userId]: {
           ...prev[userId],
           isApproved: true,
-          isBlocked: false,
         },
       }));
 
@@ -207,7 +214,6 @@ const NotificationsPage = () => {
       setProcessingAction(null);
     }
   };
-
   // Handle reject user
   const handleRejectUser = async (notification, event) => {
     if (event) event.stopPropagation();
@@ -228,13 +234,11 @@ const NotificationsPage = () => {
       const result = await adminService.rejectUser(userId, reason);
       console.log("✅ User rejected successfully:", result);
 
-      // Update local status
       setUserStatuses((prev) => ({
         ...prev,
         [userId]: {
           ...prev[userId],
           isApproved: false,
-          isBlocked: true,
         },
       }));
 
@@ -250,95 +254,21 @@ const NotificationsPage = () => {
     }
   };
 
-  // Handle block user
-  const handleBlockUser = async (notification, event) => {
-    if (event) event.stopPropagation();
-    setProcessingAction(notification._id);
-    setOpenDropdown(null);
-
-    try {
-      const userId = getUserIdFromNotification(notification);
-
-      if (!userId) {
-        throw new Error("User ID not found in notification metadata");
-      }
-
-      const reason = prompt("Enter block reason:");
-      if (!reason) return;
-
-      console.log("🔄 Blocking user:", userId);
-      const result = await adminService.blockUser(userId, reason);
-      console.log("✅ User blocked successfully:", result);
-
-      // Update local status
-      setUserStatuses((prev) => ({
-        ...prev,
-        [userId]: {
-          ...prev[userId],
-          isBlocked: true,
-        },
-      }));
-
-      fetchNotifications(page, limit, filters);
-    } catch (error) {
-      console.error("❌ Failed to block user:", error);
-      alert(
-        "Failed to block user: " +
-          (error.response?.data?.message || error.message)
-      );
-    } finally {
-      setProcessingAction(null);
-    }
-  };
-
-  // Handle unblock user
-  const handleUnblockUser = async (notification, event) => {
-    if (event) event.stopPropagation();
-    setProcessingAction(notification._id);
-    setOpenDropdown(null);
-
-    try {
-      const userId = getUserIdFromNotification(notification);
-
-      if (!userId) {
-        throw new Error("User ID not found in notification metadata");
-      }
-
-      console.log("🔄 Unblocking user:", userId);
-      const result = await adminService.unblockUser(userId);
-      console.log("✅ User unblocked successfully:", result);
-
-      // Update local status
-      setUserStatuses((prev) => ({
-        ...prev,
-        [userId]: {
-          ...prev[userId],
-          isBlocked: false,
-        },
-      }));
-
-      fetchNotifications(page, limit, filters);
-    } catch (error) {
-      console.error("❌ Failed to unblock user:", error);
-      alert(
-        "Failed to unblock user: " +
-          (error.response?.data?.message || error.message)
-      );
-    } finally {
-      setProcessingAction(null);
-    }
-  };
-
   // Handle view profile
-  const handleViewProfile = (notification, event) => {
-    event.stopPropagation();
-    setOpenDropdown(null);
+// Handle view profile
+const handleViewProfile = (notification, event) => {
+  if (event) event.stopPropagation();
+  setOpenDropdown(null);
 
-    const userId = getUserIdFromNotification(notification);
-    if (userId) {
-      navigate(`/admin/users/${userId}`);
-    }
-  };
+  const userId = getUserIdFromNotification(notification);
+  if (userId) {
+    // Navigate to user profile page
+    navigate(`/admin/users/${userId}/profile`);
+    // OR if you have a different route:
+    // navigate(`/profile/${userId}`);
+    // navigate(`/users/${userId}`);
+  }
+};
 
   // Handle send message
   const handleSendMessage = (notification, event) => {
@@ -437,7 +367,6 @@ const NotificationsPage = () => {
     return (
       userStatuses[userId] || {
         isApproved: false,
-        isBlocked: false,
         name: "Loading...",
         email: "Loading...",
       }
@@ -448,28 +377,10 @@ const NotificationsPage = () => {
   const getPrimaryActionButton = (notification) => {
     if (notification.type === "entry_approval") {
       const userStatus = getUserStatus(notification);
-      const { isApproved, isBlocked } = userStatus;
+      const { isApproved } = userStatus;
 
-      if (isBlocked) {
-        // User is blocked - show Unblock button
-        return {
-          label: "Unblock",
-          onClick: handleUnblockUser,
-          style: "bg-green-600 hover:bg-green-700 text-white",
-          loadingText: "Unblocking...",
-          icon: CheckIcon,
-        };
-      } else if (isApproved) {
-        // User is approved - show Block button
-        return {
-          label: "Block",
-          onClick: handleBlockUser,
-          style: "bg-red-600 hover:bg-red-700 text-white",
-          loadingText: "Blocking...",
-          icon: XMarkIcon,
-        };
-      } else {
-        // User is pending - show Approve button
+      if (!isApproved) {
+        // User is pending - show Approve button as primary action
         return {
           label: "Approve",
           onClick: handleApproveEntry,
@@ -478,6 +389,8 @@ const NotificationsPage = () => {
           icon: CheckIcon,
         };
       }
+      // For approved users - no primary action button
+      return null;
     }
 
     if (notification.type === "payment_due") {
@@ -497,25 +410,9 @@ const NotificationsPage = () => {
   const getDropdownMenuItems = (notification) => {
     if (notification.type === "entry_approval") {
       const userStatus = getUserStatus(notification);
-      const { isApproved, isBlocked } = userStatus;
+      const { isApproved } = userStatus;
 
-      if (isBlocked) {
-        // Blocked user dropdown options
-        return [
-          {
-            label: "Approve User",
-            icon: CheckIcon,
-            onClick: handleApproveEntry,
-            style: "text-green-700",
-          },
-          {
-            label: "Delete User",
-            icon: TrashIcon,
-            onClick: handleDeleteUser,
-            style: "text-red-700",
-          },
-        ];
-      } else if (isApproved) {
+      if (isApproved) {
         // Approved user dropdown options
         return [
           {
@@ -530,10 +427,22 @@ const NotificationsPage = () => {
             onClick: handleSendMessage,
             style: "text-gray-700",
           },
+          {
+            label: "Reject User",
+            icon: XMarkIcon,
+            onClick: handleRejectUser,
+            style: "text-red-700",
+          },
         ];
       } else {
         // Pending user dropdown options
         return [
+          {
+            label: "Approve User", // Also available in dropdown for convenience
+            icon: CheckIcon,
+            onClick: handleApproveEntry,
+            style: "text-green-700",
+          },
           {
             label: "Request More Info",
             icon: ExclamationTriangleIcon,
@@ -698,33 +607,36 @@ const NotificationsPage = () => {
                         )}
 
                         {/* Dropdown Menu */}
-                      {/* Dropdown Menu */}
-{dropdownItems.length > 0 && (
-  <div className="relative">
-    <button
-      onClick={(e) => toggleDropdown(notification._id, e)}
-      className="flex items-center justify-center p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg border border-gray-300 transition-colors"
-    >
-      <EllipsisVerticalIcon className="h-4 w-4" />
-    </button>
+                        {dropdownItems.length > 0 && (
+                          <div className="relative">
+                            <button
+                              onClick={(e) =>
+                                toggleDropdown(notification._id, e)
+                              }
+                              className="flex items-center justify-center p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg border border-gray-300 transition-colors"
+                            >
+                              <EllipsisVerticalIcon className="h-4 w-4" />
+                            </button>
 
-    {/* Dropdown Content */}
-    {openDropdown === notification._id && (
-      <div className="absolute right-0 top-full mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
-        {dropdownItems.map((item, index) => (
-          <button
-            key={index}
-            onClick={(e) => item.onClick(notification, e)}
-            className={`flex items-center w-full px-4 py-2 text-sm hover:bg-gray-50 transition-colors ${item.style}`}
-          >
-            <item.icon className="h-4 w-4 mr-2" />
-            {item.label}
-          </button>
-        ))}
-      </div>
-    )}
-  </div>
-)}
+                            {/* Dropdown Content */}
+                            {openDropdown === notification._id && (
+                              <div className="absolute left-8 top-full mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
+                                {dropdownItems.map((item, index) => (
+                                  <button
+                                    key={index}
+                                    onClick={(e) =>
+                                      item.onClick(notification, e)
+                                    }
+                                    className={`flex items-center w-full px-4 py-2 text-sm hover:bg-gray-50 transition-colors ${item.style}`}
+                                  >
+                                    <item.icon className="h-4 w-4 mr-2" />
+                                    {item.label}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ) : (
                       /* Green dot for unread notifications without action buttons */
@@ -786,11 +698,7 @@ const NotificationsPage = () => {
                             >
                               {userStatus.isApproved ? "Approved" : "Pending"}
                             </div>
-                            {userStatus.isBlocked && (
-                              <div className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
-                                Blocked
-                              </div>
-                            )}
+                           
                           </div>
                         </div>
                       )}

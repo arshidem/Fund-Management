@@ -84,8 +84,12 @@ io.use(async (socket, next) => {
 });
 
 // Handle connections
+// Handle connections
 io.on("connection", (socket) => {
   console.log(`User ${socket.userId} connected`);
+
+  // 🔹 ADD THIS: Notify all other users that this user came online
+  socket.broadcast.emit('userOnline', { userId: socket.userId });
 
   // Join personal room for notifications
   socket.join(`user-${socket.userId}`);
@@ -97,15 +101,18 @@ io.on("connection", (socket) => {
   socket.on("join-group", (groupId) => socket.join(`group-${groupId}`));
   socket.on("leave-group", (groupId) => socket.leave(`group-${groupId}`));
 
-  // Typing indicators
-  socket.on("typing-start", ({ chatId, type, userId }) => {
-    const room = type === "individual" ? `user-${chatId}` : `group-${chatId}`;
-    socket.to(room).emit("user-typing", { userId, chatId, type });
-  });
 
-  socket.on("typing-stop", ({ chatId, type, userId }) => {
-    const room = type === "individual" ? `user-${chatId}` : `group-${chatId}`;
-    socket.to(room).emit("user-stop-typing", { userId, chatId, type });
+
+  // 🔹 ADD THIS: Handle the new 'typing' event (for your current implementation)
+  socket.on("typing", (data) => {
+    const { chatId, type, isTyping, userId } = data;
+    const room = type === "individual" ? `user-${chatId}` : `event-${chatId}`;
+    socket.to(room).emit("typing", { 
+      userId, 
+      chatId, 
+      type, 
+      isTyping 
+    });
   });
 
   // Real-time notification: mark as read
@@ -132,8 +139,11 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("disconnect", () => {
-    console.log(`User ${socket.userId} disconnected`);
+  socket.on("disconnect", (reason) => {
+    console.log(`User ${socket.userId} disconnected: ${reason}`);
+    
+    // 🔹 ADD THIS: Notify all other users that this user went offline
+    socket.broadcast.emit('userOffline', { userId: socket.userId });
   });
 });
 

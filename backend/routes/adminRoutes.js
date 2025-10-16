@@ -10,15 +10,13 @@ const {
   getUserActivity,
   approveUser,
   rejectUser,
-  blockUser,
-  unblockUser,
+
   updateUserRole,
   bulkAction
 } = require('../controllers/userController');
 
 // All routes are protected and admin-only
 router.use(protect);
-router.use(adminOnly);
 
 // ==================== USER ROUTES ====================
 
@@ -30,46 +28,38 @@ router.get('/users', getAllUsers);
 // @route   GET /api/admin/users/:id
 // @desc    Get user by ID
 // @access  Private/Admin
-router.get('/users/:id', getUserById);
+router.get('/users/:id',adminOnly, getUserById);
 
 // @route   GET /api/admin/users/:id/profile
 // @desc    Get user profile with enhanced data
 // @access  Private/Admin
-router.get('/users/:id/profile', getUserProfile);
+router.get('/users/:id/profile',adminOnly, getUserProfile);
 
 // @route   GET /api/admin/users/:id/activity
 // @desc    Get user activity timeline
 // @access  Private/Admin
-router.get('/users/:id/activity', getUserActivity);
+router.get('/users/:id/activity',adminOnly, getUserActivity);
 
 // @route   PUT /api/admin/users/:id/approve
 // @desc    Approve user registration
 // @access  Private/Admin
-router.put('/users/:id/approve', approveUser);
+router.put('/users/:id/approve',adminOnly, approveUser);
 
 // @route   PUT /api/admin/users/:id/reject
 // @desc    Reject user registration
 // @access  Private/Admin
-router.put('/users/:id/reject', rejectUser);
+router.put('/users/:id/reject',adminOnly, rejectUser);
 
-// @route   PUT /api/admin/users/:id/block
-// @desc    Block user
-// @access  Private/Admin
-router.put('/users/:id/block', blockUser);
 
-// @route   PUT /api/admin/users/:id/unblock
-// @desc    Unblock user
-// @access  Private/Admin
-router.put('/users/:id/unblock', unblockUser);
 
 // @route   PUT /api/admin/users/:id/role
 // @desc    Update user role
 // @access  Private/Admin
-router.put('/users/:id/role', updateUserRole);
+router.put('/users/:id/role',adminOnly, updateUserRole);
 
 // @route   POST /api/admin/users/bulk-action
-// @desc    Bulk actions (approve/block multiple users)
+// @desc    Bulk actions (approve/ multiple users)
 // @access  Private/Admin
-router.post('/users/bulk-action', bulkAction);
+router.post('/users/bulk-action',adminOnly, bulkAction);
 
 module.exports = router;

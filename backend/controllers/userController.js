@@ -3,7 +3,7 @@ const Message = require('../models/Message');
 const AdminNote = require('../models/AdminNote');
 const Participant = require('../models/Participant');
 const { sendNotificationToUser } = require('../services/notificationService');
-
+const Contribution = require('../models/Contribution');
 // @desc    Get all users with filters and pagination
 // @access  Private/Admin
 exports.getAllUsers = async (req, res) => {
@@ -36,18 +36,13 @@ exports.getAllUsers = async (req, res) => {
       switch (status) {
         case 'pending':
           query.isApproved = false;
-          query.isBlocked = false;
           break;
         case 'approved':
           query.isApproved = true;
-          query.isBlocked = false;
           break;
-        case 'blocked':
-          query.isBlocked = true;
-          break;
+       
         case 'rejected':
           query.isApproved = false;
-          query.isBlocked = true;
           break;
       }
     }
@@ -72,15 +67,11 @@ exports.getAllUsers = async (req, res) => {
         $facet: {
           total: [{ $count: 'count' }],
           pending: [
-            { $match: { isApproved: false, isBlocked: false } },
+            { $match: { isApproved: false} },
             { $count: 'count' }
           ],
           approved: [
-            { $match: { isApproved: true, isBlocked: false } },
-            { $count: 'count' }
-          ],
-          blocked: [
-            { $match: { isBlocked: true } },
+            { $match: { isApproved: true} },
             { $count: 'count' }
           ]
         }
@@ -100,7 +91,6 @@ exports.getAllUsers = async (req, res) => {
         total: counts[0].total[0]?.count || 0,
         pending: counts[0].pending[0]?.count || 0,
         approved: counts[0].approved[0]?.count || 0,
-        blocked: counts[0].blocked[0]?.count || 0
       }
     });
 
@@ -145,6 +135,7 @@ exports.getUserById = async (req, res) => {
 
 // @desc    Get user profile with enhanced data
 // @access  Private/Admin
+// Enhanced version with monthly breakdown
 exports.getUserProfile = async (req, res) => {
   try {
     const { id } = req.params;
@@ -159,7 +150,7 @@ exports.getUserProfile = async (req, res) => {
       });
     }
 
-    // Get participation stats from Participant model
+    // Get participation stats
     const participationStats = await Participant.aggregate([
       {
         $match: { user: user._id }
@@ -187,28 +178,159 @@ exports.getUserProfile = async (req, res) => {
       }
     ]);
 
-    // Get recent participations
+    // Get recent participations with detailed contribution data
     const recentParticipations = await Participant.find({ user: user._id })
-      .populate('event', 'title date location status')
+      .populate('event', 'title date location status totalAmount')
       .sort({ joinedAt: -1 })
-      .limit(5);
+      .limit(5)
+      .lean();
+
+    // For each participation, get the actual contributions from Contribution model
+    const participationsWithContributions = await Promise.all(
+      recentParticipations.map(async (participation) => {
+        // Get all contributions for this specific participation
+        const contributions = await Contribution.find({
+          user: user._id,
+          event: participation.event?._id
+        }).select('amount paymentMethod status paymentDate');
+
+        // Calculate total contributed for this event (only count completed payments)
+        const totalContributed = contributions.reduce((sum, contribution) => {
+          // Only count completed contributions
+          if (contribution.status === 'completed') {
+            return sum + (contribution.amount || 0);
+          }
+          return sum;
+        }, 0);
+
+        // Get contribution breakdown
+        const contributionBreakdown = contributions.map(contrib => ({
+          amount: contrib.amount,
+          paymentMethod: contrib.paymentMethod,
+          status: contrib.status, // This will show 'completed', 'pending', 'failed', etc.
+          date: contrib.paymentDate
+        }));
+
+        // Determine overall payment status for this participation
+        const hasCompletedPayments = contributions.some(c => c.status === 'completed');
+        const hasPendingPayments = contributions.some(c => c.status === 'pending');
+        
+        let paymentStatus = 'pending';
+        if (hasCompletedPayments) {
+          paymentStatus = participation.event?.totalAmount 
+            ? (totalContributed >= participation.event.totalAmount ? 'paid' : 'partial')
+            : 'paid';
+        }
+
+        return {
+          ...participation,
+          totalContributed: totalContributed,
+          contributionBreakdown: contributionBreakdown,
+          contributionsCount: contributions.length,
+          // Add payment status based on actual contributions
+          paymentStatus: paymentStatus,
+          // Add remaining amount if event has totalAmount
+          remainingAmount: participation.event?.totalAmount 
+            ? participation.event.totalAmount - totalContributed 
+            : 0,
+          paymentProgress: participation.event?.totalAmount 
+            ? Math.round((totalContributed / participation.event.totalAmount) * 100)
+            : 0
+        };
+      })
+    );
+
+    // Get overall contribution statistics - FIXED STATUS CHECK
+    const contributionStats = await Contribution.aggregate([
+      {
+        $match: { user: user._id }
+      },
+      {
+        $group: {
+          _id: null,
+          totalContributions: { 
+            $sum: {
+              $cond: [
+                { $eq: ['$status', 'completed'] }, 
+                '$amount', 
+                0
+              ]
+            }
+          },
+          contributionCount: { $sum: 1 },
+          completedPayments: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'completed'] }, 1, 0]
+            }
+          },
+          failedPayments: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'failed'] }, 1, 0]
+            }
+          },
+          pendingPayments: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'pending'] }, 1, 0]
+            }
+          },
+          refundedPayments: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'refunded'] }, 1, 0]
+            }
+          },
+          averageContribution: { 
+            $avg: {
+              $cond: [
+                { $eq: ['$status', 'completed'] }, 
+                '$amount', 
+                null
+              ]
+            }
+          },
+          lastContribution: { $max: '$paymentDate' },
+          minContribution: { 
+            $min: {
+              $cond: [
+                { $eq: ['$status', 'completed'] }, 
+                '$amount', 
+                null
+              ]
+            }
+          },
+          maxContribution: { 
+            $max: {
+              $cond: [
+                { $eq: ['$status', 'completed'] }, 
+                '$amount', 
+                null
+              ]
+            }
+          }
+        }
+      }
+    ]);
 
     // Get note count
     const noteCount = await AdminNote.countDocuments({ userId: user._id });
-
-    // Get message count
-    const messageCount = await Message.countDocuments({
-      $or: [
-        { sender: user._id },
-        { recipient: user._id }
-      ]
-    });
 
     const stats = participationStats[0] || {
       totalEvents: 0,
       activeEvents: 0,
       totalContributed: 0,
       paidEvents: 0
+    };
+
+    const contributionData = contributionStats[0] || {
+      totalContributions: 0,
+      contributionCount: 0,
+      completedPayments: 0,
+      failedPayments: 0,
+      pendingPayments: 0,
+      refundedPayments: 0,
+      averageContribution: 0,
+      lastContribution: null,
+      minContribution: 0,
+      maxContribution: 0
     };
 
     res.json({
@@ -218,14 +340,33 @@ exports.getUserProfile = async (req, res) => {
         stats: {
           ...stats,
           noteCount,
-          messageCount
+          totalContributions: contributionData.totalContributions,
+          contributionCount: contributionData.contributionCount,
+          completedPayments: contributionData.completedPayments,
+          failedPayments: contributionData.failedPayments,
+          pendingPayments: contributionData.pendingPayments,
+          refundedPayments: contributionData.refundedPayments,
+          averageContribution: Math.round(contributionData.averageContribution || 0),
+          lastContribution: contributionData.lastContribution,
+          completionRate: contributionData.contributionCount > 0 
+            ? Math.round((contributionData.completedPayments / contributionData.contributionCount) * 100)
+            : 0
         },
-        recentParticipations,
+        recentParticipations: participationsWithContributions,
         participationHistory: {
           totalEvents: stats.totalEvents,
           activeParticipations: stats.activeEvents,
-          totalContributions: stats.totalContributed,
-          fullyPaidEvents: stats.paidEvents
+          totalContributions: contributionData.totalContributions,
+          fullyPaidEvents: stats.paidEvents,
+          contributionStats: {
+            totalCount: contributionData.contributionCount,
+            completionRate: contributionData.contributionCount > 0 
+              ? Math.round((contributionData.completedPayments / contributionData.contributionCount) * 100)
+              : 0,
+            averageAmount: Math.round(contributionData.averageContribution || 0),
+            minAmount: contributionData.minContribution || 0,
+            maxAmount: contributionData.maxContribution || 0
+          }
         }
       }
     });
@@ -238,7 +379,6 @@ exports.getUserProfile = async (req, res) => {
     });
   }
 };
-
 // @desc    Get user activity timeline
 // @access  Private/Admin
 exports.getUserActivity = async (req, res) => {
@@ -326,7 +466,6 @@ exports.approveUser = async (req, res) => {
 
     // Approve the user
     user.isApproved = true;
-    user.isBlocked = false; // Ensure user is not blocked
     user.isActive = true;
     await user.save();
 
@@ -351,7 +490,6 @@ exports.approveUser = async (req, res) => {
         name: user.name,
         email: user.email,
         isApproved: user.isApproved,
-        isBlocked: user.isBlocked
       }
     });
 
@@ -380,15 +518,7 @@ exports.rejectUser = async (req, res) => {
       });
     }
 
-    if (user.isBlocked) {
-      return res.status(400).json({
-        success: false,
-        message: 'User is already blocked/rejected'
-      });
-    }
 
-    // Reject the user (block and don't approve)
-    user.isBlocked = true;
     user.isApproved = false;
     user.isActive = false;
     await user.save();
@@ -414,7 +544,6 @@ exports.rejectUser = async (req, res) => {
         name: user.name,
         email: user.email,
         isApproved: user.isApproved,
-        isBlocked: user.isBlocked
       }
     });
 
@@ -427,128 +556,7 @@ exports.rejectUser = async (req, res) => {
   }
 };
 
-// @desc    Block user
-// @access  Private/Admin
-exports.blockUser = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { reason } = req.body;
 
-    const user = await User.findById(id);
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-
-    if (user.isBlocked) {
-      return res.status(400).json({
-        success: false,
-        message: 'User is already blocked'
-      });
-    }
-
-    // Block the user
-    user.isBlocked = true;
-    user.isActive = false;
-    await user.save();
-
-    // Send notification to user
-    try {
-      await sendNotificationToUser(user._id, {
-        title: 'Account Blocked',
-        message: `Your account has been temporarily blocked. ${reason ? `Reason: ${reason}` : 'Please contact admin for more information.'}`,
-        type: 'account_blocked',
-        actionUrl: '/contact',
-        priority: 'high'
-      }, req);
-    } catch (notificationError) {
-      console.error('Failed to send block notification:', notificationError);
-    }
-
-    res.json({
-      success: true,
-      message: 'User blocked successfully',
-      data: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        isApproved: user.isApproved,
-        isBlocked: user.isBlocked
-      }
-    });
-
-  } catch (error) {
-    console.error('Block user error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error blocking user'
-    });
-  }
-};
-
-// @desc    Unblock user
-// @access  Private/Admin
-exports.unblockUser = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const user = await User.findById(id);
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-
-    if (!user.isBlocked) {
-      return res.status(400).json({
-        success: false,
-        message: 'User is not blocked'
-      });
-    }
-
-    // Unblock the user
-    user.isBlocked = false;
-    user.isActive = true;
-    await user.save();
-
-    // Send notification to user
-    try {
-      await sendNotificationToUser(user._id, {
-        title: 'Account Unblocked',
-        message: 'Your account has been unblocked. You can now access all features.',
-        type: 'account_unblocked',
-        actionUrl: '/dashboard',
-        priority: 'high'
-      }, req);
-    } catch (notificationError) {
-      console.error('Failed to send unblock notification:', notificationError);
-    }
-
-    res.json({
-      success: true,
-      message: 'User unblocked successfully',
-      data: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        isApproved: user.isApproved,
-        isBlocked: user.isBlocked
-      }
-    });
-
-  } catch (error) {
-    console.error('Unblock user error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error unblocking user'
-    });
-  }
-};
 
 // @desc    Update user role
 // @access  Private/Admin
@@ -605,7 +613,6 @@ exports.updateUserRole = async (req, res) => {
   }
 };
 
-// @desc    Bulk actions (approve/block multiple users)
 // @access  Private/Admin
 exports.bulkAction = async (req, res) => {
   try {
@@ -618,10 +625,10 @@ exports.bulkAction = async (req, res) => {
       });
     }
 
-    if (!['approve', 'block', 'unblock'].includes(action)) {
+    if (!['approve'].includes(action)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid action. Must be: approve, block, or unblock'
+        message: 'Invalid action. Must be: approve'
       });
     }
 
@@ -630,16 +637,9 @@ exports.bulkAction = async (req, res) => {
 
     switch (action) {
       case 'approve':
-        updateQuery = { isApproved: true, isBlocked: false, isActive: true };
+        updateQuery = { isApproved: true, isActive: true };
         message = 'approved';
-        break;
-      case 'block':
-        updateQuery = { isBlocked: true, isActive: false };
-        message = 'blocked';
-        break;
-      case 'unblock':
-        updateQuery = { isBlocked: false, isActive: true };
-        message = 'unblocked';
+      
         break;
     }
 

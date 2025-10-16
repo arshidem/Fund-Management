@@ -17,7 +17,7 @@ export const AppProvider = ({ children }) => {
 
   const navigate = useNavigate();
 
-  // 'loading' | 'approved' | 'pending' | 'blocked'
+  // 'loading' | 'approved' | 'pending' 
   const [status, setStatus] = useState("loading");
 
   // Derived state
@@ -65,10 +65,7 @@ useEffect(() => {
         setUser(data.user);
 console.log(data.user);
 
-        if (data.user.isBlocked) {
-          setStatus("blocked");
-          navigate("/blocked");
-        } else if (!data.user.isApproved) {
+    if (!data.user.isApproved) {
           setStatus("pending");
         } else {
           setStatus("approved");
@@ -139,10 +136,7 @@ console.log(data.user);
     setToken(jwt);
     setUser(userData);
 
-    if (userData.isBlocked) {
-      setStatus("blocked");
-      navigate("/blocked");
-    } else if (!userData.isApproved) {
+   if (!userData.isApproved) {
       setStatus("pending");
     } else {
       setStatus("approved");

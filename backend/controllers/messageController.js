@@ -1123,9 +1123,25 @@ exports.handleTyping = async (req, res) => {
     const { chatId, type = 'individual', isTyping = true } = req.body;
     const userId = req.userId;
 
+    // Check if user is authenticated
+    if (!userId) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'User not authenticated' 
+      });
+    }
+
     if (req.io) {
       const room = type === 'individual' ? `user-${chatId}` : `event-${chatId}`;
-      req.io.to(room).emit('typing', { userId, chatId, type, isTyping, userName: req.user.name });
+      
+      // Emit without userName for now, or fetch user details if needed
+      req.io.to(room).emit('typing', { 
+        userId, 
+        chatId, 
+        type, 
+        isTyping 
+        // Remove userName until we can safely get it
+      });
     }
 
     res.json({ success: true, message: `Typing ${isTyping ? 'started' : 'stopped'}` });
@@ -1134,7 +1150,6 @@ exports.handleTyping = async (req, res) => {
     res.status(500).json({ success: false, message: 'Error handling typing indicator' });
   }
 };
-
 // ------------------ Expose online user manager for socket integration ------------------
 exports.updateUserStatus = async (userId, isOnline = true, socketId = null) => {
   try {

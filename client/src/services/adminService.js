@@ -62,22 +62,15 @@ export const useAdminService = () => {
       return await createRequest('PUT', `/users/${userId}/reject`, { reason });
     },
 
-    // Block user
-    blockUser: async (userId, reason = '') => {
-      return await createRequest('PUT', `/users/${userId}/block`, { reason });
-    },
+ 
 
-    // Unblock user
-    unblockUser: async (userId) => {
-      return await createRequest('PUT', `/users/${userId}/unblock`);
-    },
 
     // Update user role
     updateUserRole: async (userId, role) => {
       return await createRequest('PUT', `/users/${userId}/role`, { role });
     },
 
-    // Bulk actions (approve/block multiple users)
+    // Bulk actions (approve multiple users)
     bulkAction: async (userIds, action) => {
       return await createRequest('POST', '/users/bulk-action', { userIds, action });
     }

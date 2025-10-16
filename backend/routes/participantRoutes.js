@@ -36,7 +36,7 @@ router.delete('/admin/:participantId', adminOnly, removeParticipant);
 
 // ==================== GENERIC PARTICIPANT ROUTES (LAST) ====================
 router.get('/:participantId', protect, getParticipantDetails);
-router.put('/:participantId/status', protect, updateParticipantStatus);
+router.put('/:participantId/status', adminOnly, updateParticipantStatus);
 router.delete('/:participantId', protect, removeParticipant);
 
 module.exports = router;

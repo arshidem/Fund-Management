@@ -14,7 +14,6 @@ exports.protect = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findById(decoded.id);
     if (!user) return res.status(401).json({ message: "Unauthorized" });
-    // if (user.isBlocked) return res.status(403).json({ message: "Your account is blocked" });
 
     req.userId = user._id;
     req.userRole = user.role;

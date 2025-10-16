@@ -5,7 +5,7 @@ import { FaHome, FaCalendarAlt, FaComments, FaWallet, FaUser } from "react-icons
 const tabs = [
   { name: "Dashboard", icon: <FaHome />, path: "/dashboard" },
   { name: "Events", icon: <FaCalendarAlt />, path: "/events" },
-  { name: "Chat", icon: <FaComments />, path: "/messages" },
+  { name: "Chat", icon: <FaComments />, path: "/messages/chat" },
   { name: "Contributions", icon: <FaWallet />, path: "/contribution" },
   { name: "Profile", icon: <FaUser />, path: "/profile" },
 ];

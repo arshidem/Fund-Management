@@ -2,12 +2,17 @@ import React from "react";
 import { FaTimes, FaMoneyBillWave, FaCalendar, FaReceipt } from "react-icons/fa";
 
 const ParticipantDetailsModal = ({ participant, contributions, event, onClose, formatCurrency, formatDate }) => {
+  // Add safe access to nested properties
+  const userName = participant?.user?.name || 'Unknown User';
+  const userEmail = participant?.user?.email || 'Not provided';
+  const userPhone = participant?.user?.phone || 'Not provided';
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-gray-700">
           <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-            {participant.user.name} - Details
+            {userName} - Details
           </h3>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
             <FaTimes />
@@ -20,20 +25,20 @@ const ParticipantDetailsModal = ({ participant, contributions, event, onClose, f
             <div className="space-y-3">
               <h4 className="font-semibold text-gray-900 dark:text-white">Personal Information</h4>
               <div className="space-y-2">
-                <p><strong>Email:</strong> {participant.user.email}</p>
-                <p><strong>Phone:</strong> {participant.user.phone || 'Not provided'}</p>
-                <p><strong>Joined:</strong> {formatDate(participant.joinedAt)}</p>
-                <p><strong>Status:</strong> <span className="capitalize">{participant.status}</span></p>
+                <p><strong>Email:</strong> {userEmail}</p>
+                <p><strong>Phone:</strong> {userPhone}</p>
+                <p><strong>Joined:</strong> {participant?.joinedAt ? formatDate(participant.joinedAt) : 'Unknown'}</p>
+                <p><strong>Status:</strong> <span className="capitalize">{participant?.status || 'unknown'}</span></p>
               </div>
             </div>
             
             <div className="space-y-3">
               <h4 className="font-semibold text-gray-900 dark:text-white">Payment Information</h4>
               <div className="space-y-2">
-                <p><strong>Total Contributed:</strong> {formatCurrency(participant.totalContributed)}</p>
-                <p><strong>Payment Status:</strong> <span className="capitalize">{participant.paymentStatus}</span></p>
-                <p><strong>Remaining Amount:</strong> {formatCurrency(participant.remainingAmount)}</p>
-                <p><strong>Progress:</strong> {participant.paymentPercentage?.toFixed(1)}%</p>
+                <p><strong>Total Contributed:</strong> {formatCurrency(participant?.totalContributed || 0)}</p>
+                <p><strong>Payment Status:</strong> <span className="capitalize">{participant?.paymentStatus || 'unknown'}</span></p>
+                <p><strong>Remaining Amount:</strong> {formatCurrency(participant?.remainingAmount || 0)}</p>
+                <p><strong>Progress:</strong> {(participant?.paymentPercentage || 0).toFixed(1)}%</p>
               </div>
             </div>
           </div>
@@ -41,7 +46,7 @@ const ParticipantDetailsModal = ({ participant, contributions, event, onClose, f
           {/* Contribution History */}
           <div>
             <h4 className="font-semibold text-gray-900 dark:text-white mb-4">Contribution History</h4>
-            {contributions.length === 0 ? (
+            {!contributions || contributions.length === 0 ? (
               <p className="text-gray-500 dark:text-gray-400">No contributions found</p>
             ) : (
               <div className="space-y-3">

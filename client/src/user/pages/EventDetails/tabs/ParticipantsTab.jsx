@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useParticipantService } from "../../../../services/participantService";
 import { useContributionService } from "../../../../services/contributionService";
 import AddOfflineContributionModal from "../components/AddOfflineContributionModal";
-import ParticipantDetailsModal from "../components/ParticipantDetailsModal";
+import ParticipantDetailsModal from "../components/ParticipantDetailsModal"
 import BulkActionsPanel from "../components/BulkActionsPanel";
 import {
   FaUserPlus,
@@ -871,21 +871,21 @@ const ParticipantsTab = ({
           formatCurrency={formatCurrency}
         />
       )}
-
-      {showDetailsModal && selectedParticipant && (
-        <ParticipantDetailsModal
-          participant={selectedParticipant}
-          contributions={participantContributions}
-          event={event}
-          onClose={() => {
-            setShowDetailsModal(false);
-            setSelectedParticipant(null);
-            setParticipantContributions([]);
-          }}
-          formatCurrency={formatCurrency}
-          formatDate={formatDate}
-        />
-      )}
+{showDetailsModal && selectedParticipant && (
+  console.log('Selected Participant Data:', selectedParticipant),
+  <ParticipantDetailsModal
+    participant={selectedParticipant}
+    contributions={participantContributions}
+    event={event}
+    onClose={() => {
+      setShowDetailsModal(false);
+      setSelectedParticipant(null);
+      setParticipantContributions([]);
+    }}
+    formatCurrency={formatCurrency}
+    formatDate={formatDate}
+  />
+)}
     </div>
   );
 };

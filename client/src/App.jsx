@@ -3,6 +3,7 @@ import React from "react";
 import { useAppContext, AppProvider } from "./context/AppContext";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { NotificationProvider } from "./context/NotificationContext";
+import { SocketProvider } from "./context/SocketContext"; // Import SocketProvider
 
 import SignIn from "./user/pages/SignIn";
 import Landing from "./user/pages/Landing";
@@ -14,12 +15,14 @@ import EventDetails from "./user/pages/EventDetails/EventDetails";
 import NotificationsPage from "./user/pages/NotificationsPage";
 import Profile from "./user/pages/Profile";
 import PrivacySecurity from "./user/pages/PrivacySecurity";
-import UserMessage from "./user/pages/UserMessage";
+import UserMessage from "./user/pages/Messages/UserMessage";
 import ProtectedLayout from "./user/components/ProtectedLayout";
 import EventForm from "./user/pages/EventDetails/components/EventForm";
 import { Toaster } from "react-hot-toast";
 import "./index.css";
-
+import UserProfile from "./user/pages/UserProfile";
+import ChatList from "./user/pages/Messages/ChatList";
+import ChatWindow from "./user/pages/Messages/ChatWindow";
 // Theme wrapper that uses the context
 function ThemeWrapper({ children }) {
   const { theme } = useAppContext();
@@ -65,11 +68,17 @@ function AppContent() {
           <Route path="/events/:eventId" element={<EventDetails />} />
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/profile" element={<Profile />} />
+          <Route
+            path="/admin/users/:userId/profile"
+            element={<UserProfile />}
+          />
           <Route path="/privacy&security" element={<PrivacySecurity />} />
-          <Route path="/messages" element={<UserMessage />} />
           <Route path="/events" element={<Event />} />
           <Route path="/admin/events/edit/:id" element={<EventForm />} />
-          <Route path="/messages/user/:userId" element={<UserMessage />} />
+          <Route path="/messages" element={<UserMessage />}></Route>
+          <Route path="/messages/chat" element={<ChatList />} />
+          <Route path="/messages/chat/:chatId" element={<ChatWindow />} />
+          
         </Route>
 
         <Route path="*" element={<Navigate to="/landing" replace />} />
@@ -81,21 +90,25 @@ function AppContent() {
 function App() {
   return (
     <AppProvider>
-      <NotificationProvider>
-        <Toaster
-          position="bottom-center"
-          toastOptions={{
-            duration: 4000,
-            style: { background: "#363636", color: "#fff" },
-            success: { duration: 3000 },
-            error: {
-              duration: 5000,
-              style: { background: "#ef4444", color: "#fff" },
-            },
-          }}
-        />
-        <AppContent />
-      </NotificationProvider>
+      <SocketProvider>
+        {" "}
+        {/* Wrap with SocketProvider */}
+        <NotificationProvider>
+          <Toaster
+            position="bottom-center"
+            toastOptions={{
+              duration: 4000,
+              style: { background: "#363636", color: "#fff" },
+              success: { duration: 3000 },
+              error: {
+                duration: 5000,
+                style: { background: "#ef4444", color: "#fff" },
+              },
+            }}
+          />
+          <AppContent />
+        </NotificationProvider>
+      </SocketProvider>
     </AppProvider>
   );
 }

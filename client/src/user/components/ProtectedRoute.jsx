@@ -25,10 +25,7 @@ const ProtectedRoute = ({ requireApproved = false, children }) => {
     return <Navigate to="/landing" replace />;
   }
 
-  // User is blocked - redirect to blocked page
-  if (status === "blocked") {
-    return <Navigate to="/blocked" replace />;
-  }
+
 
   // Route requires approval but user is not approved
   if (requireApproved && status !== "approved") {

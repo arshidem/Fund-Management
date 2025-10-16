@@ -99,7 +99,6 @@ exports.requestOTP = async (req, res) => {
       message: "OTP sent to your email",
       userExists: true,
       isApproved: user.isApproved,
-      isBlocked: user.isBlocked || false,
     });
   } catch (error) {
     console.error("❌ Request OTP error:", error);
@@ -134,13 +133,6 @@ exports.verifyOTP = async (req, res) => {
       });
     }
 
-    // Check if user is blocked
-    if (user.isBlocked) {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Your account is temporarily blocked. Please contact admin." 
-      });
-    }
 
     // Check OTP validity
     const isExpired = !user.otpExpires || user.otpExpires < new Date();
