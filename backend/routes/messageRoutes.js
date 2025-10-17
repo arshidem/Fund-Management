@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const messageController = require('../controllers/messageController');
-const { uploadFiles, uploadAudio } = require('../middleware/upload');
+const { uploadFiles, uploadAudio, uploadVoice } = require('../middleware/upload');
 
-// Auth middlewares - adjust paths/names if your project uses different ones
+// Auth middlewares
 const { protect, adminOnly } = require('../middleware/authMiddleware');
 
 // ------------------ Conversations & History ------------------
@@ -11,14 +11,22 @@ router.get('/conversations', protect, messageController.getConversations);
 router.get('/history/:type/:chatId', protect, messageController.getChatHistory);
 
 // ------------------ Sending Messages ------------------
-// Send multiple files (field name: 'files')
 router.post('/send-with-files', protect, uploadFiles, messageController.sendMessageWithFiles);
-
-// Send audio (field name: 'audio')
 router.post('/send-audio', protect, uploadAudio, messageController.sendAudioMessage);
-
-// Send text/regular message
+router.post('/send-voice', protect, uploadVoice, messageController.sendVoiceMessage);
 router.post('/send', protect, messageController.sendMessage);
+
+// ------------------ Voice Message Routes ------------------
+router.get('/voice-messages', protect, messageController.getVoiceMessages);
+router.patch('/voice-messages/:messageId/status', protect, messageController.updateVoiceMessageStatus);
+
+// ------------------ Call Routes ------------------
+router.post('/calls/initiate', protect, messageController.initiateCall);
+router.post('/calls/accept', protect, messageController.acceptCall);
+router.post('/calls/reject', protect, messageController.rejectCall);
+router.post('/calls/end', protect, messageController.endCall);
+router.get('/calls/history', protect, messageController.getCallHistory);
+router.get('/calls/active', protect, messageController.getActiveCalls);
 
 // ------------------ Message Actions ------------------
 router.post('/:messageId/react', protect, messageController.reactToMessage);
@@ -35,7 +43,7 @@ router.post('/typing', protect, messageController.handleTyping);
 // ------------------ Search / Starred / Notes ------------------
 router.get('/search', protect, messageController.searchMessages);
 router.get('/starred', protect, messageController.getStarredMessages);
-router.post('/internal-note', protect, adminOnly, messageController.addInternalNote); // admin-only
+router.post('/internal-note', protect, adminOnly, messageController.addInternalNote);
 
 // ------------------ Online / Stats ------------------
 router.get('/online', protect, messageController.getOnlineUsers);

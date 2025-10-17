@@ -22,7 +22,7 @@ const messageSchema = new mongoose.Schema({
     default: ''
   },
 
-  // Message Types & Content
+  // Updated Message Types & Content
   type: {
     type: String,
     enum: [
@@ -32,16 +32,48 @@ const messageSchema = new mongoose.Schema({
       'document',
       'video',
       'system',
-      'multiple'
+      'multiple',
+      'voice', // New: Voice message type
+      'call'   // New: Call log type
     ],
     default: 'text'
   },
 
-  // File Attachments
+  // Call-specific fields (for call logs)
+  callInfo: {
+    callType: {
+      type: String,
+      enum: ['audio', 'video'],
+      default: 'audio'
+    },
+    callStatus: {
+      type: String,
+      enum: ['initiated', 'ongoing', 'completed', 'missed', 'rejected', 'cancelled', 'failed'],
+      default: 'initiated'
+    },
+    callDuration: {
+      type: Number, // in seconds
+      default: 0
+    },
+    callStartedAt: Date,
+    callEndedAt: Date,
+    participants: [{
+      userId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+      },
+      joinedAt: Date,
+      leftAt: Date,
+      duration: Number
+    }],
+    callId: String // Unique identifier for the call session
+  },
+
+  // File Attachments (enhanced for voice messages)
   attachments: [{
     type: {
       type: String,
-      enum: ['image', 'audio', 'video', 'document', 'other'],
+      enum: ['image', 'audio', 'video', 'document', 'other', 'voice'], // Added 'voice'
       required: true
     },
     url: {
@@ -52,10 +84,32 @@ const messageSchema = new mongoose.Schema({
     filename: String,
     originalName: String,
     size: Number,
-    duration: Number,
+    duration: Number, // For audio/video/voice messages
     mimeType: String,
-    waveform: [Number]
+    waveform: [Number], // For voice message visualization
+    sampleRate: Number, // For voice messages
+    bitrate: Number, // For voice messages
+    channels: Number // For voice messages
   }],
+
+  // Voice message specific fields
+  voiceMessage: {
+    duration: Number, // in seconds
+    fileSize: Number, // in bytes
+    mimeType: {
+      type: String,
+      default: 'audio/mpeg'
+    },
+    waveform: [Number], // Array of amplitude values for visualization
+    isPlaying: {
+      type: Boolean,
+      default: false
+    },
+    playbackRate: {
+      type: Number,
+      default: 1.0
+    }
+  },
 
   // Delivery / Read status
   status: {
@@ -212,7 +266,9 @@ const messageSchema = new mongoose.Schema({
     clientMessageId: String,
     deviceId: String,
     ipAddress: String,
-    userAgent: String
+    userAgent: String,
+    recordingDevice: String, // For voice messages
+    recordingQuality: String // For voice messages
   }
 }, {
   timestamps: true
@@ -228,6 +284,9 @@ messageSchema.index({ 'starredBy.userId': 1 });
 messageSchema.index({ status: 1 });
 messageSchema.index({ eventId: 1, createdAt: -1 });
 messageSchema.index({ 'replyTo.messageId': 1 });
+messageSchema.index({ type: 1 }); // New index for message type
+messageSchema.index({ 'callInfo.callStatus': 1 }); // New index for call status
+messageSchema.index({ 'callInfo.callId': 1 }); // New index for call sessions
 
 // ==================== VIRTUALS ====================
 messageSchema.virtual('isAudio').get(function() {
@@ -236,12 +295,27 @@ messageSchema.virtual('isAudio').get(function() {
   return hasTypeAudio || hasAttachmentAudio;
 });
 
+messageSchema.virtual('isVoiceMessage').get(function() {
+  return this.type === 'voice' || (Array.isArray(this.attachments) && this.attachments.some(a => a.type === 'voice'));
+});
+
+messageSchema.virtual('isCall').get(function() {
+  return this.type === 'call';
+});
+
 messageSchema.virtual('hasAttachments').get(function() {
   return Array.isArray(this.attachments) && this.attachments.length > 0;
 });
 
 messageSchema.virtual('reactionCount').get(function() {
   return Array.isArray(this.reactions) ? this.reactions.length : 0;
+});
+
+messageSchema.virtual('callDurationFormatted').get(function() {
+  if (!this.callInfo || !this.callInfo.callDuration) return '0:00';
+  const minutes = Math.floor(this.callInfo.callDuration / 60);
+  const seconds = this.callInfo.callDuration % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 });
 
 // ==================== METHODS ====================
@@ -299,6 +373,52 @@ messageSchema.methods.addInternalNote = function(adminId, note, isPrivate = true
   return this.save();
 };
 
+// New methods for voice messages
+messageSchema.methods.markAsPlaying = function() {
+  this.voiceMessage.isPlaying = true;
+  return this.save();
+};
+
+messageSchema.methods.markAsStopped = function() {
+  this.voiceMessage.isPlaying = false;
+  return this.save();
+};
+
+// New methods for calls
+messageSchema.methods.updateCallStatus = function(status, duration = null) {
+  this.callInfo.callStatus = status;
+  if (duration !== null) {
+    this.callInfo.callDuration = duration;
+  }
+  if (status === 'completed' || status === 'missed' || status === 'rejected') {
+    this.callInfo.callEndedAt = new Date();
+  }
+  return this.save();
+};
+
+messageSchema.methods.addCallParticipant = function(userId) {
+  this.callInfo.participants = this.callInfo.participants || [];
+  const existingParticipant = this.callInfo.participants.find(p => p.userId.equals(userId));
+  if (!existingParticipant) {
+    this.callInfo.participants.push({
+      userId,
+      joinedAt: new Date()
+    });
+  }
+  return this.save();
+};
+
+messageSchema.methods.removeCallParticipant = function(userId) {
+  if (this.callInfo.participants) {
+    const participant = this.callInfo.participants.find(p => p.userId.equals(userId));
+    if (participant && !participant.leftAt) {
+      participant.leftAt = new Date();
+      participant.duration = Math.floor((participant.leftAt - participant.joinedAt) / 1000);
+    }
+  }
+  return this.save();
+};
+
 // ==================== STATICS ====================
 messageSchema.statics.getUnreadCount = function(userId) {
   return this.countDocuments({
@@ -326,12 +446,100 @@ messageSchema.statics.getConversation = function(user1Id, user2Id, limit = 50, b
     .limit(limit);
 };
 
+// New static methods for calls
+messageSchema.statics.createCallLog = function(callData) {
+  const {
+    sender,
+    recipient,
+    callType = 'audio',
+    callStatus = 'initiated',
+    callId
+  } = callData;
+
+  return this.create({
+    sender,
+    recipient,
+    type: 'call',
+    body: `${callType === 'audio' ? 'Audio' : 'Video'} call ${callStatus}`,
+    callInfo: {
+      callType,
+      callStatus,
+      callId,
+      callStartedAt: new Date(),
+      participants: []
+    }
+  });
+};
+
+messageSchema.statics.getCallHistory = function(userId, limit = 20) {
+  return this.find({
+    type: 'call',
+    $or: [
+      { sender: userId },
+      { recipient: userId }
+    ]
+  })
+  .populate('sender', 'name avatar')
+  .populate('recipient', 'name avatar')
+  .sort({ createdAt: -1 })
+  .limit(limit);
+};
+
+// New static methods for voice messages
+messageSchema.statics.createVoiceMessage = function(messageData) {
+  const {
+    sender,
+    recipient,
+    audioUrl,
+    duration,
+    fileSize,
+    waveform,
+    filename,
+    mimeType = 'audio/mpeg'
+  } = messageData;
+
+  return this.create({
+    sender,
+    recipient,
+    type: 'voice',
+    body: 'Voice message',
+    voiceMessage: {
+      duration,
+      fileSize,
+      mimeType,
+      waveform: waveform || []
+    },
+    attachments: [{
+      type: 'voice',
+      url: audioUrl,
+      filename: filename || `voice_message_${Date.now()}`,
+      duration: duration,
+      size: fileSize,
+      mimeType: mimeType,
+      waveform: waveform || []
+    }]
+  });
+};
+
 // ==================== PRE HOOKS ====================
 messageSchema.pre('save', function(next) {
   // Auto-generate snippet for replies
   if (this.replyTo && this.replyTo.messageId && !this.replyTo.snippet) {
     this.replyTo.snippet = (this.body || '').substring(0, 100) + (this.body && this.body.length > 100 ? '...' : '');
   }
+
+  // Auto-set body for call messages
+  if (this.type === 'call' && !this.body) {
+    const callType = this.callInfo?.callType === 'video' ? 'Video' : 'Audio';
+    const status = this.callInfo?.callStatus || 'initiated';
+    this.body = `${callType} call ${status}`;
+  }
+
+  // Auto-set body for voice messages
+  if (this.type === 'voice' && !this.body) {
+    this.body = 'Voice message';
+  }
+
   next();
 });
 

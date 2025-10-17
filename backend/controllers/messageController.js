@@ -1,6 +1,6 @@
 const Message = require('../models/Message');
 const User = require('../models/User');
-const Event = require('../models/Event'); // <-- use Event instead of Group
+const Event = require('../models/Event');
 const AudioMessage = require('../models/AudioMessage');
 const path = require('path');
 const mongoose = require('mongoose');
@@ -11,7 +11,8 @@ const { log } = require('console');
 // In-memory online users map (socketId info). Keep this file's onlineUsers map consistent with your socket setup.
 const onlineUsers = new Map(); // if you already keep it elsewhere, import/replace accordingly
 
-// ---------------------- HELPERS ----------------------
+// In-memory call sessions
+const activeCalls = new Map();
 
 // ---------------------- HELPERS ----------------------
 const isUserOnline = (userId) => {
@@ -19,6 +20,11 @@ const isUserOnline = (userId) => {
 };
 
 const mapIdToString = (id) => (id ? id.toString() : id);
+
+const generateCallId = () => {
+  return `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+};
+
 
 // ---------------------- CONTROLLERS ----------------------
 
@@ -1163,5 +1169,654 @@ exports.updateUserStatus = async (userId, isOnline = true, socketId = null) => {
     console.error('Update user status error:', error);
   }
 };
+
+
+// ---------------------- CONTROLLERS ----------------------
+
+// @desc    Send voice message
+// @access  Private
+exports.sendVoiceMessage = async (req, res) => {
+  let audioFile = req.file;
+  
+  try {
+    const { recipientId, eventId, duration, waveform } = req.body;
+    const senderId = req.userId;
+
+    console.log('Voice upload request received:', {
+      fileName: audioFile?.originalname,
+      size: audioFile?.size,
+      timestamp: new Date().toISOString()
+    });
+
+    // Early validation before file processing
+    if (!audioFile) {
+      return res.status(400).json({ success: false, message: 'Audio file is required' });
+    }
+
+    if (!recipientId && !eventId) {
+      if (fs.existsSync(audioFile.path)) fs.unlinkSync(audioFile.path);
+      return res.status(400).json({ success: false, message: 'recipientId or eventId required' });
+    }
+
+    // Validate recipient/event
+    if (recipientId) {
+      const recipient = await User.findById(recipientId);
+      if (!recipient) {
+        if (fs.existsSync(audioFile.path)) fs.unlinkSync(audioFile.path);
+        return res.status(404).json({ success: false, message: 'Recipient not found' });
+      }
+    } else if (eventId) {
+      const event = await Event.findOne({ _id: eventId, participants: senderId });
+      if (!event) {
+        if (fs.existsSync(audioFile.path)) fs.unlinkSync(audioFile.path);
+        return res.status(404).json({ success: false, message: 'Event not found or access denied' });
+      }
+    }
+
+    // Create unique filename to avoid duplicates
+    const filename = `voice-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(audioFile.originalname) || '.webm'}`;
+    const newFilePath = path.join(path.dirname(audioFile.path), filename);
+    
+    // Rename the file to ensure uniqueness
+    fs.renameSync(audioFile.path, newFilePath);
+    audioFile.path = newFilePath;
+    audioFile.filename = filename;
+
+    const audioUrl = `/uploads/voice-messages/${filename}`;
+
+    // Create voice message
+    const messageData = {
+      sender: senderId,
+      audioUrl: audioUrl,
+      duration: parseInt(duration) || 0,
+      fileSize: audioFile.size,
+      waveform: waveform ? JSON.parse(waveform) : [],
+      filename: audioFile.originalname,
+      mimeType: audioFile.mimetype,
+      recipient: recipientId,
+      eventId: eventId || undefined
+    };
+
+    const message = await Message.createVoiceMessage(messageData);
+    await message.populate('sender', 'name email avatar');
+    if (recipientId) await message.populate('recipient', 'name email avatar');
+
+    console.log('Voice message created successfully:', message._id);
+
+    // Real-time emission
+    if (req.io) {
+      const room = recipientId ? `user-${recipientId}` : `event-${eventId}`;
+      req.io.to(room).emit('newMessage', message);
+      req.io.to(room).emit('voiceMessageSent', {
+        messageId: message._id,
+        duration: message.voiceMessage.duration,
+        url: message.attachments[0].url
+      });
+    }
+
+    // Notifications
+    if (recipientId) {
+      await sendMessageNotification(recipientId, {
+        messageId: message._id,
+        senderId,
+        body: '🎤 Voice message',
+        type: 'voice'
+      }, req);
+    } else if (eventId) {
+      await sendGroupMessageNotification(eventId, {
+        messageId: message._id,
+        senderId,
+        body: '🎤 Voice message',
+        type: 'voice'
+      }, req);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Voice message sent successfully',
+      data: message
+    });
+
+  } catch (error) {
+    console.error('Send voice message error:', error);
+    
+    // Clean up file on error
+    if (audioFile && fs.existsSync(audioFile.path)) {
+      try {
+        fs.unlinkSync(audioFile.path);
+        console.log('Cleaned up voice file due to error:', audioFile.path);
+      } catch (unlinkError) {
+        console.error('Error cleaning up voice file:', unlinkError);
+      }
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Error sending voice message',
+      error: error.message
+    });
+  }
+};
+// @desc    Initiate audio/video call
+// @access  Private
+exports.initiateCall = async (req, res) => {
+  try {
+    const { recipientId, callType = 'audio' } = req.body;
+    const senderId = req.userId;
+
+    if (!recipientId) {
+      return res.status(400).json({ success: false, message: 'recipientId is required' });
+    }
+
+    const recipient = await User.findById(recipientId);
+    if (!recipient) {
+      return res.status(404).json({ success: false, message: 'Recipient not found' });
+    }
+
+    // Check if recipient is online
+    if (!isUserOnline(recipientId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Recipient is offline',
+        data: { isOnline: false }
+      });
+    }
+
+    // Generate unique call ID
+    const callId = generateCallId();
+
+    // Create call log
+    const callData = {
+      sender: senderId,
+      recipient: recipientId,
+      callType,
+      callStatus: 'initiated',
+      callId
+    };
+
+    const callMessage = await Message.createCallLog(callData);
+    await callMessage.populate('sender', 'name email avatar');
+    await callMessage.populate('recipient', 'name email avatar');
+
+    // Store call session
+    const callSession = {
+      callId,
+      callerId: senderId,
+      recipientId,
+      callType,
+      status: 'initiated',
+      startedAt: new Date(),
+      participants: [senderId],
+      messageId: callMessage._id
+    };
+    activeCalls.set(callId, callSession);
+
+    // Real-time call initiation
+    if (req.io) {
+      req.io.to(`user-${recipientId}`).emit('incomingCall', {
+        callId,
+        caller: callMessage.sender,
+        callType,
+        messageId: callMessage._id
+      });
+
+      req.io.to(`user-${senderId}`).emit('callInitiated', {
+        callId,
+        recipient: callMessage.recipient,
+        callType,
+        messageId: callMessage._id
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      message: `${callType === 'audio' ? 'Audio' : 'Video'} call initiated`,
+      data: {
+        callId,
+        callMessage,
+        recipient: callMessage.recipient
+      }
+    });
+
+  } catch (error) {
+    console.error('Initiate call error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error initiating call',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Accept call
+// @access  Private
+exports.acceptCall = async (req, res) => {
+  try {
+    const { callId } = req.body;
+    const userId = req.userId;
+
+    const callSession = activeCalls.get(callId);
+    if (!callSession) {
+      return res.status(404).json({ success: false, message: 'Call not found or expired' });
+    }
+
+    if (callSession.recipientId !== userId.toString()) {
+      return res.status(403).json({ success: false, message: 'Not authorized to accept this call' });
+    }
+
+    // Update call session
+    callSession.status = 'ongoing';
+    callSession.participants.push(userId);
+    activeCalls.set(callId, callSession);
+
+    // Update call log
+    const callMessage = await Message.findById(callSession.messageId);
+    if (callMessage) {
+      await callMessage.updateCallStatus('ongoing');
+      await callMessage.addCallParticipant(userId);
+    }
+
+    // Real-time call acceptance
+    if (req.io) {
+      req.io.to(`user-${callSession.callerId}`).emit('callAccepted', {
+        callId,
+        acceptedBy: userId
+      });
+
+      req.io.to(`user-${userId}`).emit('callConnected', {
+        callId,
+        callerId: callSession.callerId
+      });
+
+      // Notify both parties to establish peer connection
+      req.io.to(`user-${callSession.callerId}`).emit('establishPeerConnection', { callId });
+      req.io.to(`user-${userId}`).emit('establishPeerConnection', { callId });
+    }
+
+    res.json({
+      success: true,
+      message: 'Call accepted',
+      data: { callId, callSession }
+    });
+
+  } catch (error) {
+    console.error('Accept call error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error accepting call',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Reject call
+// @access  Private
+exports.rejectCall = async (req, res) => {
+  try {
+    const { callId, reason = 'rejected' } = req.body;
+    const userId = req.userId;
+
+    const callSession = activeCalls.get(callId);
+    if (!callSession) {
+      return res.status(404).json({ success: false, message: 'Call not found or expired' });
+    }
+
+    // Update call log
+    const callMessage = await Message.findById(callSession.messageId);
+    if (callMessage) {
+      await callMessage.updateCallStatus('rejected');
+    }
+
+    // Real-time call rejection
+    if (req.io) {
+      req.io.to(`user-${callSession.callerId}`).emit('callRejected', {
+        callId,
+        rejectedBy: userId,
+        reason
+      });
+    }
+
+    // Clean up call session
+    activeCalls.delete(callId);
+
+    res.json({
+      success: true,
+      message: 'Call rejected',
+      data: { callId }
+    });
+
+  } catch (error) {
+    console.error('Reject call error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error rejecting call',
+      error: error.message
+    });
+  }
+};
+
+// @desc    End call
+// @access  Private
+exports.endCall = async (req, res) => {
+  try {
+    const { callId, duration = 0 } = req.body;
+    const userId = req.userId;
+
+    const callSession = activeCalls.get(callId);
+    if (!callSession) {
+      return res.status(404).json({ success: false, message: 'Call not found or expired' });
+    }
+
+    // Verify user is a participant
+    if (!callSession.participants.includes(userId.toString())) {
+      return res.status(403).json({ success: false, message: 'Not a participant in this call' });
+    }
+
+    // Update call log with duration
+    const callMessage = await Message.findById(callSession.messageId);
+    if (callMessage) {
+      await callMessage.updateCallStatus('completed', duration);
+      
+      // Mark participants as left
+      for (const participantId of callSession.participants) {
+        await callMessage.removeCallParticipant(participantId);
+      }
+    }
+
+    // Real-time call end
+    if (req.io) {
+      for (const participantId of callSession.participants) {
+        req.io.to(`user-${participantId}`).emit('callEnded', {
+          callId,
+          endedBy: userId,
+          duration,
+          callMessage: callMessage ? await Message.findById(callMessage._id).populate('sender recipient') : null
+        });
+      }
+    }
+
+    // Clean up call session
+    activeCalls.delete(callId);
+
+    res.json({
+      success: true,
+      message: 'Call ended',
+      data: {
+        callId,
+        duration,
+        callMessage: callMessage ? await Message.findById(callMessage._id).populate('sender recipient') : null
+      }
+    });
+
+  } catch (error) {
+    console.error('End call error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error ending call',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Get call history
+// @access  Private
+exports.getCallHistory = async (req, res) => {
+  try {
+    const { page = 1, limit = 20 } = req.query;
+    const userId = req.userId;
+
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    const callHistory = await Message.getCallHistory(userId, limitNum);
+    const total = await Message.countDocuments({
+      type: 'call',
+      $or: [
+        { sender: userId },
+        { recipient: userId }
+      ]
+    });
+
+    res.json({
+      success: true,
+      data: callHistory,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        pages: Math.ceil(total / limitNum)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get call history error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching call history',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Get active calls
+// @access  Private
+exports.getActiveCalls = async (req, res) => {
+  try {
+    const userId = req.userId;
+    
+    const userActiveCalls = Array.from(activeCalls.values()).filter(callSession => 
+      callSession.participants.includes(userId.toString()) && 
+      callSession.status === 'ongoing'
+    );
+
+    res.json({
+      success: true,
+      data: userActiveCalls
+    });
+
+  } catch (error) {
+    console.error('Get active calls error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching active calls',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Update voice message playback status
+// @access  Private
+exports.updateVoiceMessageStatus = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const { isPlaying, playbackRate = 1.0 } = req.body;
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ success: false, message: 'Voice message not found' });
+    }
+
+    if (!message.isVoiceMessage) {
+      return res.status(400).json({ success: false, message: 'Not a voice message' });
+    }
+
+    if (isPlaying) {
+      await message.markAsPlaying();
+    } else {
+      await message.markAsStopped();
+    }
+
+    if (playbackRate !== 1.0) {
+      message.voiceMessage.playbackRate = playbackRate;
+      await message.save();
+    }
+
+    // Real-time playback status update
+    if (req.io) {
+      const room = message.recipient ? `user-${message.recipient}` : `event-${message.eventId}`;
+      req.io.to(room).emit('voiceMessagePlayback', {
+        messageId: message._id,
+        isPlaying,
+        playbackRate
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `Voice message ${isPlaying ? 'playing' : 'stopped'}`,
+      data: message
+    });
+
+  } catch (error) {
+    console.error('Update voice message status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating voice message status',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Get voice messages
+// @access  Private
+exports.getVoiceMessages = async (req, res) => {
+  try {
+    const { chatId, type = 'individual', page = 1, limit = 20 } = req.query;
+    const userId = req.userId;
+
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    let query = {
+      $or: [
+        { type: 'voice' },
+        { 'attachments.type': 'voice' }
+      ]
+    };
+
+    if (type === 'individual' && chatId) {
+      query.$or = [
+        { sender: userId, recipient: chatId },
+        { sender: chatId, recipient: userId }
+      ];
+      query.eventId = { $exists: false };
+    } else if (type === 'event' && chatId) {
+      query.eventId = chatId;
+    } else {
+      // Get all voice messages for user
+      const eventIds = await Event.find({ participants: userId }).distinct('_id');
+      query.$or = [
+        { sender: userId },
+        { recipient: userId },
+        { eventId: { $in: eventIds } }
+      ];
+    }
+
+    const voiceMessages = await Message.find(query)
+      .populate('sender', 'name email avatar')
+      .populate('recipient', 'name email avatar')
+      .populate('eventId', 'name')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum);
+
+    const total = await Message.countDocuments(query);
+
+    res.json({
+      success: true,
+      data: voiceMessages,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        pages: Math.ceil(total / limitNum)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get voice messages error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching voice messages',
+      error: error.message
+    });
+  }
+};
+
+// ------------------ Socket Event Handlers ------------------
+
+// Handle WebRTC signaling
+exports.handleWebRTCSignal = async (socket, data) => {
+  try {
+    const { callId, signal, targetUserId } = data;
+    
+    const callSession = activeCalls.get(callId);
+    if (!callSession) {
+      socket.emit('error', { message: 'Call session not found' });
+      return;
+    }
+
+    // Verify user is part of the call
+    if (!callSession.participants.includes(socket.userId)) {
+      socket.emit('error', { message: 'Not a participant in this call' });
+      return;
+    }
+
+    // Forward the signal to the target user
+    socket.to(`user-${targetUserId}`).emit('rtcSignal', {
+      callId,
+      signal,
+      fromUserId: socket.userId
+    });
+
+  } catch (error) {
+    console.error('WebRTC signaling error:', error);
+    socket.emit('error', { message: 'WebRTC signaling failed' });
+  }
+};
+
+// Handle call timeout
+exports.handleCallTimeout = async (callId) => {
+  try {
+    const callSession = activeCalls.get(callId);
+    if (!callSession) return;
+
+    // Update call log as missed
+    const callMessage = await Message.findById(callSession.messageId);
+    if (callMessage) {
+      await callMessage.updateCallStatus('missed');
+    }
+
+    // Notify caller
+    const io = require('socket.io')(); // You might need to pass io instance differently
+    io.to(`user-${callSession.callerId}`).emit('callMissed', {
+      callId,
+      reason: 'No answer'
+    });
+
+    // Clean up
+    activeCalls.delete(callId);
+
+  } catch (error) {
+    console.error('Call timeout handling error:', error);
+  }
+};
+
+// ------------------ Expose call management for socket integration ------------------
+exports.getCallSession = (callId) => {
+  return activeCalls.get(callId);
+};
+
+exports.setCallSession = (callId, session) => {
+  activeCalls.set(callId, session);
+};
+
+exports.deleteCallSession = (callId) => {
+  activeCalls.delete(callId);
+};
+
+
 
 exports.getOnlineStatus = (userId) => isUserOnline(userId);
