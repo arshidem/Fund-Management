@@ -767,6 +767,8 @@ exports.forwardMessage = async (req, res) => {
   try {
     const { messageId } = req.params;
     const { recipients = [], events = [] } = req.body; // renamed groups->events
+    console.log(req.body);
+
     const originalMessage = await Message.findById(messageId);
     if (!originalMessage) return res.status(404).json({ success: false, message: 'Message not found' });
 
@@ -822,7 +824,141 @@ exports.forwardMessage = async (req, res) => {
     res.status(500).json({ success: false, message: 'Error forwarding message' });
   }
 };
+exports.forwardMessages = async (req, res) => {
+  try {
+    const { messageIds, recipients = [], events = [] } = req.body;
+console.log(req.body);
 
+    if (!messageIds || !Array.isArray(messageIds) || messageIds.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Message IDs array is required' 
+      });
+    }
+
+    if (recipients.length === 0 && events.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'At least one recipient or event is required' 
+      });
+    }
+
+    // Find all original messages
+    const originalMessages = await Message.find({ 
+      _id: { $in: messageIds } 
+    });
+
+    if (originalMessages.length === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'No messages found' 
+      });
+    }
+
+    const forwardedMessages = [];
+    const forwardResults = [];
+
+    // Forward each message to each recipient/event
+    for (const originalMessage of originalMessages) {
+      const messageForwardResults = [];
+
+      // Forward to individual recipients
+      for (const recipientId of recipients) {
+        const message = await Message.create({
+          sender: req.userId,
+          recipient: recipientId,
+          body: originalMessage.body,
+          type: originalMessage.type,
+          attachments: originalMessage.attachments,
+          forwardedFrom: {
+            messageId: originalMessage._id,
+            originalSender: originalMessage.sender,
+            forwardedAt: new Date()
+          },
+          forwardCount: (originalMessage.forwardCount || 0) + 1
+        });
+        
+        forwardedMessages.push(message);
+        messageForwardResults.push({
+          recipientId,
+          messageId: message._id,
+          type: 'individual'
+        });
+
+        if (req.io) req.io.to(`user-${recipientId}`).emit('newMessage', message);
+        await sendMessageNotification(recipientId, { 
+          messageId: message._id, 
+          senderId: req.userId, 
+          body: message.body 
+        }, req);
+      }
+
+      // Forward to event groups
+      for (const eventId of events) {
+        const message = await Message.create({
+          sender: req.userId,
+          eventId,
+          body: originalMessage.body,
+          type: originalMessage.type,
+          attachments: originalMessage.attachments,
+          forwardedFrom: {
+            messageId: originalMessage._id,
+            originalSender: originalMessage.sender,
+            forwardedAt: new Date()
+          },
+          forwardCount: (originalMessage.forwardCount || 0) + 1
+        });
+        
+        forwardedMessages.push(message);
+        messageForwardResults.push({
+          eventId,
+          messageId: message._id,
+          type: 'event'
+        });
+
+        if (req.io) req.io.to(`event-${eventId}`).emit('newMessage', message);
+        await sendGroupMessageNotification(eventId, { 
+          messageId: message._id, 
+          senderId: req.userId, 
+          body: message.body 
+        }, req);
+      }
+
+      // Update forward count for original message
+      originalMessage.forwardCount = (originalMessage.forwardCount || 0) + recipients.length + events.length;
+      await originalMessage.save();
+
+      forwardResults.push({
+        originalMessageId: originalMessage._id,
+        forwards: messageForwardResults
+      });
+    }
+
+    const totalForwards = forwardedMessages.length;
+    const totalDestinations = recipients.length + events.length;
+
+    res.json({ 
+      success: true, 
+      message: `Forwarded ${originalMessages.length} message${originalMessages.length > 1 ? 's' : ''} to ${totalDestinations} destination${totalDestinations > 1 ? 's' : ''} (${totalForwards} total forwards)`,
+      data: {
+        forwardedMessages,
+        summary: {
+          originalMessages: originalMessages.length,
+          destinations: totalDestinations,
+          totalForwards: totalForwards
+        },
+        details: forwardResults
+      }
+    });
+
+  } catch (error) {
+    console.error('Forward messages error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error forwarding messages' 
+    });
+  }
+};
 // @desc    Star/Unstar message
 // @access  Private
 exports.toggleStarMessage = async (req, res) => {
@@ -876,7 +1012,108 @@ exports.deleteMessage = async (req, res) => {
     res.status(500).json({ success: false, message: 'Error deleting message' });
   }
 };
+exports.deleteMessages = async (req, res) => {
+  try {
+    const { messageIds, deleteForEveryone = false } = req.body;
 
+    if (!messageIds || !Array.isArray(messageIds) || messageIds.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Message IDs array is required' 
+      });
+    }
+
+    // Validate that all messageIds are valid ObjectIds
+    const validObjectIds = messageIds.every(id => mongoose.Types.ObjectId.isValid(id));
+    if (!validObjectIds) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Invalid message ID format' 
+      });
+    }
+
+    // Find all messages
+    const messages = await Message.find({ 
+      _id: { $in: messageIds } 
+    });
+
+    if (messages.length === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'No messages found' 
+      });
+    }
+
+    const messagesForEveryone = [];
+    const messagesForUser = [];
+
+    // Separate messages based on deletion type and permissions
+    for (const message of messages) {
+      const isSender = message.sender.equals(req.userId);
+
+      if (deleteForEveryone && isSender) {
+        // Delete for everyone (only if user is sender)
+        messagesForEveryone.push(message._id);
+      } else {
+        // Delete for user only
+        messagesForUser.push(message._id);
+      }
+    }
+
+    // Delete for everyone
+    if (messagesForEveryone.length > 0) {
+      await Message.deleteMany({ 
+        _id: { $in: messagesForEveryone } 
+      });
+      
+      // Emit socket events for everyone deletion
+      if (req.io) {
+        messagesForEveryone.forEach(messageId => {
+          const message = messages.find(m => m._id.equals(messageId));
+          if (message) {
+            const room = message.recipient ? `user-${message.recipient}` : `event-${message.eventId}`;
+            req.io.to(room).emit('messageDeleted', { 
+              messageId: message._id, 
+              deletedForEveryone: true, 
+              deletedBy: req.userId 
+            });
+          }
+        });
+      }
+    }
+
+    // Delete for user only (soft delete)
+    if (messagesForUser.length > 0) {
+      await Message.updateMany(
+        { _id: { $in: messagesForUser } },
+        { 
+          $addToSet: { deletedFor: req.userId },
+          $set: { updatedAt: new Date() }
+        }
+      );
+    }
+
+    // Prepare response
+    const result = {
+      deletedForEveryone: messagesForEveryone.length,
+      deletedForUser: messagesForUser.length,
+      totalDeleted: messagesForEveryone.length + messagesForUser.length
+    };
+
+    res.json({ 
+      success: true, 
+      message: `Deleted ${result.totalDeleted} messages successfully`,
+      data: result
+    });
+
+  } catch (error) {
+    console.error('Delete messages error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error deleting messages' 
+    });
+  }
+};
 // @desc    Mark messages as read
 // @access  Private
 exports.markAsRead = async (req, res) => {

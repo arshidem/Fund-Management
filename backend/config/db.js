@@ -14,7 +14,7 @@ const connectDB = async () => {
 
       if (attempts < maxRetries) {
         console.log("🔁 Retrying in 5 seconds...");
-        setTimeout(connect, 5000);
+        setTimeout(connect, 2000);
       } else {
         console.error("💥 Could not connect to MongoDB after multiple attempts");
         process.exit(1);

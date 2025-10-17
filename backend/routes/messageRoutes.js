@@ -32,9 +32,11 @@ router.get('/calls/active', protect, messageController.getActiveCalls);
 router.post('/:messageId/react', protect, messageController.reactToMessage);
 router.post('/:messageId/reply', protect, messageController.replyToMessage);
 router.post('/:messageId/forward', protect, messageController.forwardMessage);
+router.post('/forward', protect, messageController.forwardMessages);
 router.post('/:messageId/star', protect, messageController.toggleStarMessage);
 router.delete('/:messageId', protect, messageController.deleteMessage);
-
+// Add new route for bulk deletion
+router.delete('/', protect, messageController.deleteMessages);
 // ------------------ Read / Typing / Status ------------------
 router.post('/mark-read', protect, messageController.markAsRead);
 router.post('/status', protect, messageController.updateMessageStatus);

@@ -71,15 +71,57 @@ export const useMessageService = () => {
   };
 
   // ======== VOICE MESSAGES ========
-  const sendVoiceMessage = async (voiceData) => {
+const sendVoiceMessage = async (voiceData) => {
+  try {
+    // Validate input
+    if (!voiceData.voiceFile) {
+      throw new Error('No voice file provided');
+    }
+
+    // Ensure we have a proper File object
+    if (!(voiceData.voiceFile instanceof File) && !(voiceData.voiceFile instanceof Blob)) {
+      throw new Error('Invalid voice file type');
+    }
+
     const formData = new FormData();
-    if (voiceData.voiceFile) formData.append('voice', voiceData.voiceFile);
+    
+    // Append file with explicit filename - THIS IS THE KEY FIX
+    const fileName = voiceData.voiceFile.name || `voice-message-${Date.now()}.webm`;
+    formData.append('voice', voiceData.voiceFile, fileName);
+    
+    // Append other data
     if (voiceData.recipientId) formData.append('recipientId', voiceData.recipientId);
     if (voiceData.eventId) formData.append('eventId', voiceData.eventId);
     if (voiceData.duration) formData.append('duration', voiceData.duration.toString());
     if (voiceData.waveform) formData.append('waveform', JSON.stringify(voiceData.waveform));
-    return createRequest('POST', '/messages/send-voice', formData, { isFormData: true });
-  };
+
+    // Debug log to verify data
+    console.log('Sending voice message with:', {
+      fileName: fileName,
+      size: voiceData.voiceFile.size,
+      type: voiceData.voiceFile.type,
+      recipientId: voiceData.recipientId,
+      duration: voiceData.duration,
+      hasWaveform: !!voiceData.waveform
+    });
+
+    // Verify FormData contents
+    console.log('FormData entries:');
+    for (let [key, value] of formData.entries()) {
+      if (value instanceof File) {
+        console.log(`  ${key}: File - ${value.name} (${value.size} bytes, ${value.type})`);
+      } else {
+        console.log(`  ${key}: ${value}`);
+      }
+    }
+
+    return await createRequest('POST', '/messages/send-voice', formData, { isFormData: true });
+    
+  } catch (error) {
+    console.error('Error in sendVoiceMessage:', error);
+    throw error;
+  }
+};
 
   const getVoiceMessages = async (chatId, type = 'individual', filters = {}) =>
     createRequest('GET', '/messages/voice-messages', null, { 
@@ -115,15 +157,38 @@ export const useMessageService = () => {
   const reactToMessage = (messageId, emoji) =>
     createRequest('POST', `/messages/${messageId}/react`, { emoji });
 
-  const forwardMessage = (messageId, targets) =>
-    createRequest('POST', `/messages/${messageId}/forward`, targets);
+// Forward single message
+const forwardMessage = async (messageId, { recipients = [], events = [] }) => {
+  return createRequest('POST', `/messages/${messageId}/forward`, {
+    recipients,
+    events
+  });
+};
 
+// Forward multiple messages (for bulk forwarding)
+const forwardMessages = async (messageIds, { recipients = [], events = [] }) => {
+  return createRequest('POST', '/messages/forward', {
+    messageIds,
+    recipients,
+    events
+  });
+};
   const toggleStarMessage = (messageId, action = 'star') =>
     createRequest('POST', `/messages/${messageId}/star`, { action });
 
-  const deleteMessage = (messageId, deleteForEveryone = false) =>
-    createRequest('DELETE', `/messages/${messageId}`, { deleteForEveryone });
+// In messageService.js
+const deleteMessages = async (messageIds, deleteForEveryone = false) => {
+  return createRequest('DELETE', '/messages', { // Changed from '/messages/bulk' to '/messages'
+    messageIds,
+    deleteForEveryone
+  });
+};
 
+const deleteMessage = async (messageId, deleteForEveryone = false) => {
+  return createRequest('DELETE', `/messages/${messageId}`, {
+    deleteForEveryone
+  });
+};
   const markAsRead = (chatId, type = 'individual', messageIds = []) =>
     createRequest('POST', '/messages/mark-read', { chatId, type, messageIds });
 
@@ -188,9 +253,11 @@ export const useMessageService = () => {
     // Message Actions
     replyToMessage,
     reactToMessage,
+    forwardMessages,
     forwardMessage,
     toggleStarMessage,
     deleteMessage,
+    deleteMessages,
     markAsRead,
     searchMessages,
     getStarredMessages,
@@ -211,51 +278,320 @@ export const useMessageService = () => {
 
 // ======== SOCKET EVENT HANDLERS ========
 export const setupMessageSocketHandlers = (socket, messageService) => {
-  // Presence via socket events
-  socket.emit('user-online', { socketId: socket.id });
+  console.log('🔌 New socket connection:', socket.id);
 
-  socket.on('disconnect', () => {
-    socket.emit('user-offline', { socketId: socket.id });
+  // Extract user ID from socket auth (assuming JWT token in handshake)
+  const userId = socket.handshake.auth?.userId || socket.handshake.query?.userId;
+  
+  if (!userId) {
+    console.error('❌ No user ID provided for socket connection');
+    socket.disconnect();
+    return;
+  }
+
+  // Join user to their personal room
+  socket.join(`user-${userId}`);
+  console.log(`✅ User ${userId} joined room: user-${userId}`);
+
+  // ======== PRESENCE & CONNECTION ========
+  socket.emit('user-online', { socketId: socket.id, userId });
+
+  // Notify others that this user is online
+  socket.broadcast.emit('userOnline', { userId, socketId: socket.id });
+
+  socket.on('disconnect', (reason) => {
+    console.log(`🔴 User ${userId} disconnected:`, reason);
+    socket.broadcast.emit('userOffline', { userId });
   });
 
-  // Typing indicators
-  socket.on('start-typing', (data) => {
-    socket.to(data.room).emit('user-typing', { userId: data.userId, isTyping: true });
+  // ======== TYPING INDICATORS ========
+  socket.on('typing', (data) => {
+    const { chatId, type, isTyping } = data;
+    
+    if (type === 'individual') {
+      // Send to specific user
+      socket.to(`user-${chatId}`).emit('typing', {
+        userId,
+        chatId,
+        isTyping,
+        type: 'individual'
+      });
+    } else if (type === 'event') {
+      // Send to all event participants
+      socket.to(`event-${chatId}`).emit('typing', {
+        userId,
+        chatId,
+        isTyping,
+        type: 'event'
+      });
+    }
   });
 
-  socket.on('stop-typing', (data) => {
-    socket.to(data.room).emit('user-typing', { userId: data.userId, isTyping: false });
+  // ======== MESSAGE STATUS EVENTS ========
+  socket.on('message-delivered', async (data) => {
+    try {
+      const { messageId, recipientId } = data;
+      
+      // Update in database
+      await messageService.updateMessageStatus(messageId, 'delivered');
+      
+      // Notify sender
+      socket.to(`user-${recipientId}`).emit('messageStatus', {
+        messageId,
+        status: 'delivered',
+        deliveredAt: new Date()
+      });
+    } catch (error) {
+      console.error('Error updating message delivery status:', error);
+    }
   });
 
-  // Message delivery/read events
-  socket.on('message-delivered', (data) => {
-    socket.emit('message-delivered', data);
+  socket.on('message-read', async (data) => {
+    try {
+      const { messageIds, readerId, chatId } = data;
+      
+      // Update in database
+      await messageService.markMessagesAsRead(messageIds, readerId);
+      
+      // Notify sender(s)
+      socket.emit('messagesRead', {
+        messageIds,
+        readerId,
+        readAt: new Date(),
+        chatId
+      });
+    } catch (error) {
+      console.error('Error updating message read status:', error);
+    }
   });
 
-  socket.on('message-read', (data) => {
-    socket.emit('message-read', data);
+  // ======== FORWARDED MESSAGES ========
+socket.on('forwardedMessage', async (data) => {
+  try {
+    console.log('🔍 DEBUG forwardedMessage event received:', {
+      fromUser: socket.handshake.auth?.userId,
+      toUser: data.recipientId,
+      hasMessage: !!data.message,
+      hasForwardedBy: !!data.forwardedBy,
+      socketId: socket.id
+    });
+
+    const { message, recipientId, forwardedBy } = data;
+    
+    if (!recipientId) {
+      console.error('❌ Missing recipientId in forwardedMessage');
+      return socket.emit('forwardError', { error: 'Missing recipient ID' });
+    }
+
+    if (!message) {
+      console.error('❌ Missing message in forwardedMessage');
+      return socket.emit('forwardError', { error: 'Missing message' });
+    }
+    
+    console.log(`📨 Forwarding message from user ${socket.handshake.auth?.userId} to user: ${recipientId}`);
+    
+    // Generate proper message ID for the forwarded message
+    const forwardedMessageId = generateMessageId();
+    
+    // Create the forwarded message object
+    const forwardedMessageData = {
+      ...message,
+      _id: forwardedMessageId,
+      isOptimistic: false,
+      createdAt: new Date(),
+      status: 'sent',
+      // Ensure these critical fields are set
+      sender: forwardedBy, // The person who forwarded it
+      recipient: recipientId, // The recipient
+      // Preserve forwarding info
+      forwardedFrom: {
+        messageId: message._id,
+        originalSender: message.sender,
+        forwardedAt: new Date(),
+        forwardedBy: forwardedBy.name || 'User'
+      }
+    };
+
+    console.log('💾 Saving forwarded message to database...', {
+      messageId: forwardedMessageId,
+      recipientId: recipientId,
+      senderId: forwardedBy._id
+    });
+    
+    // Save to database
+    const savedMessage = await messageService.saveMessage(forwardedMessageData);
+    
+    console.log('✅ Message saved to database:', savedMessage._id);
+
+    const recipientRoom = `user-${recipientId}`;
+    console.log(`📤 Emitting to recipient room: ${recipientRoom}`);
+    console.log(`📤 Current socket rooms:`, socket.rooms);
+    
+    // Emit to the specific recipient - using socket.to for broadcasting
+    socket.to(recipientRoom).emit('newMessage', savedMessage);
+    
+    // Also emit a specific forwarded event for UI updates
+    socket.to(recipientRoom).emit('forwardedMessage', {
+      message: savedMessage,
+      forwardedBy
+    });
+
+    console.log(`✅ Forwarded message delivered to ${recipientRoom}`);
+    
+    // Confirm to sender that forward was successful
+    socket.emit('forwardSuccess', {
+      messageId: savedMessage._id,
+      recipientId: recipientId
+    });
+    
+  } catch (error) {
+    console.error('❌ Error handling forwarded message:', error);
+    socket.emit('forwardError', { 
+      error: 'Failed to forward message',
+      details: error.message 
+    });
+  }
+});
+
+socket.on('forwardedToGroup', async (data) => {
+  try {
+    console.log('🔍 DEBUG forwardedToGroup event received:', {
+      fromUser: socket.handshake.auth?.userId,
+      toEvent: data.eventId,
+      hasMessage: !!data.message,
+      socketId: socket.id
+    });
+
+    const { message, eventId, forwardedBy } = data;
+    
+    if (!eventId) {
+      console.error('❌ Missing eventId in forwardedToGroup');
+      return;
+    }
+
+    if (!message) {
+      console.error('❌ Missing message in forwardedToGroup');
+      return;
+    }
+    
+    console.log(`📨 Forwarding message to event: ${eventId}`);
+    
+    // Generate proper message ID
+    const forwardedMessageId = generateMessageId();
+    
+    // Create group message
+    const groupMessageData = {
+      ...message,
+      _id: forwardedMessageId,
+      isOptimistic: false,
+      createdAt: new Date(),
+      status: 'sent',
+      eventId: eventId,
+      sender: forwardedBy,
+      // Remove recipient for group messages
+      recipient: undefined,
+      forwardedFrom: {
+        messageId: message._id,
+        originalSender: message.sender,
+        forwardedAt: new Date(),
+        forwardedBy: forwardedBy.name || 'User'
+      }
+    };
+    
+    console.log('💾 Saving group forwarded message to database...', {
+      messageId: forwardedMessageId,
+      eventId: eventId
+    });
+
+    // Save to database
+    const savedMessage = await messageService.saveMessage(groupMessageData);
+    
+    console.log('✅ Group message saved to database:', savedMessage._id);
+
+    const eventRoom = `event-${eventId}`;
+    console.log(`📤 Emitting to event room: ${eventRoom}`);
+    
+    // Emit to all participants in the group/event (except sender)
+    socket.to(eventRoom).emit('newMessage', savedMessage);
+    
+    // Also emit specific forwarded event
+    socket.to(eventRoom).emit('forwardedToGroup', {
+      message: savedMessage,
+      eventId,
+      forwardedBy
+    });
+
+    console.log(`✅ Forwarded message delivered to event ${eventId}`);
+    
+  } catch (error) {
+    console.error('❌ Error handling group forwarded message:', error);
+    socket.emit('forwardError', { 
+      error: 'Failed to forward message to group',
+      details: error.message 
+    });
+  }
+});
+
+  // ======== MESSAGE REACTIONS ========
+  socket.on('messageReaction', async (data) => {
+    try {
+      const { messageId, emoji, userId } = data;
+      
+      // Save reaction to database
+      await messageService.addReaction(messageId, userId, emoji);
+      
+      // Broadcast to all users in the chat
+      const message = await messageService.getMessage(messageId);
+      const chatRoom = message.eventId ? `event-${message.eventId}` : `user-${message.recipient}`;
+      
+      socket.to(chatRoom).emit('messageReaction', {
+        messageId,
+        emoji,
+        userId,
+        reactedAt: new Date()
+      });
+      
+    } catch (error) {
+      console.error('Error handling message reaction:', error);
+    }
   });
 
   // ======== VOICE MESSAGE EVENTS ========
-  socket.on('voice-message-playback', (data) => {
-    socket.to(data.room).emit('voice-message-playback-update', data);
+  socket.on('voiceMessagePlayback', (data) => {
+    const { messageId, isPlaying, currentTime } = data;
+    
+    // Broadcast playback status to other users in the chat
+    socket.broadcast.emit('voiceMessagePlayback', {
+      messageId,
+      isPlaying,
+      currentTime,
+      userId
+    });
   });
 
-  socket.on('voice-message-played', (data) => {
-    // Update playback stats when voice message is played
-    const { messageId, playTime } = data;
-    messageService.updateVoiceMessageStatus(messageId, { 
-      isPlaying: false, 
-      playbackStats: { lastPlayedAt: new Date(), totalPlayTime: playTime } 
-    });
+  socket.on('voiceMessagePlayed', async (data) => {
+    try {
+      const { messageId, playTime } = data;
+      
+      // Update playback stats in database
+      await messageService.updateVoiceMessageStatus(messageId, { 
+        lastPlayedAt: new Date(), 
+        totalPlayTime: playTime 
+      });
+    } catch (error) {
+      console.error('Error updating voice message status:', error);
+    }
   });
 
   // ======== CALL EVENTS ========
   socket.on('initiate-call', (data) => {
-    const { recipientId, callType } = data;
-    socket.to(`user-${recipientId}`).emit('incoming-call', {
-      callId: data.callId,
-      caller: data.caller,
+    const { recipientId, callType, callId, caller } = data;
+    
+    console.log(`📞 Initiating ${callType} call to ${recipientId}`);
+    
+    socket.to(`user-${recipientId}`).emit('incomingCall', {
+      callId,
+      caller,
       callType,
       timestamp: new Date()
     });
@@ -263,74 +599,71 @@ export const setupMessageSocketHandlers = (socket, messageService) => {
 
   socket.on('accept-call', (data) => {
     const { callId, callerId } = data;
-    socket.to(`user-${callerId}`).emit('call-accepted', {
+    
+    socket.to(`user-${callerId}`).emit('callAccepted', {
       callId,
-      acceptedBy: data.userId,
+      acceptedBy: userId,
       timestamp: new Date()
     });
   });
 
   socket.on('reject-call', (data) => {
-    const { callId, callerId } = data;
-    socket.to(`user-${callerId}`).emit('call-rejected', {
+    const { callId, callerId, reason } = data;
+    
+    socket.to(`user-${callerId}`).emit('callRejected', {
       callId,
-      rejectedBy: data.userId,
-      reason: data.reason,
+      rejectedBy: userId,
+      reason: reason || 'rejected',
       timestamp: new Date()
     });
   });
 
   socket.on('end-call', (data) => {
     const { callId, participants } = data;
+    
     participants.forEach(participantId => {
-      socket.to(`user-${participantId}`).emit('call-ended', {
-        callId,
-        endedBy: data.endedBy,
-        duration: data.duration,
-        timestamp: new Date()
-      });
+      if (participantId !== userId) {
+        socket.to(`user-${participantId}`).emit('callEnded', {
+          callId,
+          endedBy: userId,
+          duration: data.duration,
+          timestamp: new Date()
+        });
+      }
     });
   });
 
-  // WebRTC Signaling
+  // ======== WEBRTC SIGNALING ========
   socket.on('rtc-signal', (data) => {
     const { targetUserId, signal, callId } = data;
-    socket.to(`user-${targetUserId}`).emit('rtc-signal', {
+    
+    socket.to(`user-${targetUserId}`).emit('rtcSignal', {
       signal,
       callId,
-      fromUserId: data.userId
+      fromUserId: userId
     });
   });
 
   socket.on('ice-candidate', (data) => {
-    const { targetUserId, candidate } = data;
-    socket.to(`user-${targetUserId}`).emit('ice-candidate', {
+    const { targetUserId, candidate, callId } = data;
+    
+    socket.to(`user-${targetUserId}`).emit('iceCandidate', {
       candidate,
-      fromUserId: data.userId
+      callId,
+      fromUserId: userId
     });
   });
 
-  // ======== INCOMING EVENT HANDLERS ========
-  socket.on('new-voice-message', (data) => {
-    // Handle incoming voice message notification
-    console.log('New voice message received:', data);
-  });
-
-  socket.on('incoming-call', (data) => {
-    // Handle incoming call notification
-    console.log('Incoming call:', data);
-  });
-
-  socket.on('call-ended', (data) => {
-    // Handle call ended notification
-    console.log('Call ended:', data);
-  });
-
-  socket.on('voice-message-playback-update', (data) => {
-    // Handle voice message playback status updates from other users
-    console.log('Voice message playback update:', data);
+  // ======== ERROR HANDLING ========
+  socket.on('error', (error) => {
+    console.error('Socket error:', error);
   });
 };
+
+// Helper function to generate message IDs
+function generateMessageId() {
+  return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
 
 // ======== VOICE MESSAGE UTILITIES ========
 export const voiceMessageUtils = {
